@@ -35,8 +35,9 @@ import dev.hardwood.schema.ColumnProjection;
 /// Parquet (`oss`), an indexed ordinary footer (`jump`), and modular metadata (`modular`).
 ///
 /// The query projects and filters `Severity`, returning 30,208 rows with a sum of 120,832. Both
-/// footer initialization and the complete filtered query are measured, since lazy representations
-/// intentionally defer some metadata work until query planning.
+/// `open` measures the representation's projection-independent schema/directory work. The complete
+/// filtered query includes preparing metadata for the resolved projection and filter columns, then
+/// executing the same data-page scan for every representation.
 ///
 /// Generate the corpus and derived files in `parquet-footer-bench`, then run:
 /// ```shell

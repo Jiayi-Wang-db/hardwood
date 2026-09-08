@@ -11,6 +11,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.AbstractList;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import dev.hardwood.internal.thrift.ThriftCompactConstants.FieldType.Codes;
+import dev.hardwood.internal.reader.ProjectedColumnMetadata;
 import dev.hardwood.metadata.ColumnChunk;
 import dev.hardwood.metadata.ColumnOrder;
 import dev.hardwood.metadata.FileMetaData;
@@ -289,7 +291,8 @@ public final class JumpTableFileMetadataReader {
         return new ParquetReadException("Malformed jump-table footer: " + message);
     }
 
-    private static final class IndexedRowGroups extends AbstractList<RowGroup> {
+    private static final class IndexedRowGroups extends AbstractList<RowGroup>
+            implements ProjectedColumnMetadata {
         private final ByteBuffer footer;
         private final Index index;
         private final long[] totalByteSizes;
@@ -323,6 +326,17 @@ public final class JumpTableFileMetadataReader {
         @Override
         public int size() {
             return cache.length;
+        }
+
+        @Override
+        public void prepareColumns(BitSet columns) {
+            for (int rowGroup = 0; rowGroup < cache.length; rowGroup++) {
+                List<ColumnChunk> chunks = get(rowGroup).columns();
+                for (int column = columns.nextSetBit(0); column >= 0;
+                        column = columns.nextSetBit(column + 1)) {
+                    chunks.get(column);
+                }
+            }
         }
     }
 

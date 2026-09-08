@@ -10,6 +10,7 @@ package dev.hardwood.internal.thrift;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.AbstractList;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.Objects;
 
 import dev.hardwood.InputFile;
 import dev.hardwood.internal.FetchReason;
+import dev.hardwood.internal.reader.ProjectedColumnMetadata;
 import dev.hardwood.internal.thrift.ThriftCompactConstants.FieldType.Codes;
 import dev.hardwood.metadata.ColumnChunk;
 import dev.hardwood.metadata.ColumnMetaData;
@@ -55,8 +57,7 @@ public final class ModularFileMetadataReader {
             throw malformed("schema has " + fileSchema.getColumnCount() + " leaf columns, root has "
                     + root.numColumns);
         }
-        Placement placement = readPlacement(
-                module(metadata, placementLocation, "modular-placement"), root);
+        PlacementSource placement = new PlacementSource(metadata, placementLocation, root);
         StatisticsSource statistics = readStatistics(metadata, root);
         FileDetails details = readFileDetails(metadata, root);
         List<RowGroup> rowGroups = new ModularRowGroups(root, fileSchema, placement, statistics);
@@ -550,14 +551,15 @@ public final class ModularFileMetadataReader {
 
     /// Row-group metadata backed by the modular placement arrays. A row-group record is created
     /// only when planning reaches it; its column chunks remain lazy after that.
-    private static final class ModularRowGroups extends AbstractList<RowGroup> {
+    private static final class ModularRowGroups extends AbstractList<RowGroup>
+            implements ProjectedColumnMetadata {
         private final Root root;
         private final FileSchema schema;
-        private final Placement placement;
+        private final PlacementSource placement;
         private final StatisticsSource statistics;
         private final RowGroup[] cache;
 
-        private ModularRowGroups(Root root, FileSchema schema, Placement placement,
+        private ModularRowGroups(Root root, FileSchema schema, PlacementSource placement,
                 StatisticsSource statistics) {
             this.root = root;
             this.schema = schema;
@@ -573,13 +575,15 @@ public final class ModularFileMetadataReader {
             if (existing != null) {
                 return existing;
             }
+            Placement decodedPlacement = placement.get();
             long totalByteSize = 0;
             for (int column = 0; column < root.numColumns; column++) {
                 int chunk = column * root.numRowGroups + index;
-                totalByteSize = Math.addExact(totalByteSize, placement.uncompressedSizes[chunk]);
+                totalByteSize = Math.addExact(
+                        totalByteSize, decodedPlacement.uncompressedSizes[chunk]);
             }
             RowGroup created = new RowGroup(
-                    new ModularColumns(root, schema, placement, statistics, index),
+                    new ModularColumns(root, schema, decodedPlacement, statistics, index),
                     totalByteSize, root.rowGroupNumRows[index]);
             cache[index] = created;
             return created;
@@ -588,6 +592,17 @@ public final class ModularFileMetadataReader {
         @Override
         public int size() {
             return cache.length;
+        }
+
+        @Override
+        public void prepareColumns(BitSet columns) {
+            for (int rowGroup = 0; rowGroup < cache.length; rowGroup++) {
+                List<ColumnChunk> chunks = get(rowGroup).columns();
+                for (int column = columns.nextSetBit(0); column >= 0;
+                        column = columns.nextSetBit(column + 1)) {
+                    chunks.get(column);
+                }
+            }
         }
     }
 
@@ -699,6 +714,26 @@ public final class ModularFileMetadataReader {
                              long[] dictionaryPageOffsets, long[] compressedSizes,
                              long[] uncompressedSizes, long[] numValues, long[] codecs,
                              long[] physicalTypes) {
+    }
+
+    private static final class PlacementSource {
+        private final ByteBuffer metadata;
+        private final Location location;
+        private final Root root;
+        private Placement decoded;
+
+        private PlacementSource(ByteBuffer metadata, Location location, Root root) {
+            this.metadata = metadata;
+            this.location = location;
+            this.root = root;
+        }
+
+        private synchronized Placement get() {
+            if (decoded == null) {
+                decoded = readPlacement(module(metadata, location, "modular-placement"), root);
+            }
+            return decoded;
+        }
     }
 
     private record FileDetails(String createdBy, Map<String, String> keyValues) {

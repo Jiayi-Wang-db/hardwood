@@ -1158,6 +1158,7 @@ public class RowGroupIterator {
                         filterPredicate);
         List<RowGroup> sourceRowGroups = fileIndex == 0 && firstFileRowGroups != null
                 ? firstFileRowGroups : prepared.rowGroups();
+        prepareProjectedMetadata(prepared.rowGroups(), columnOrdinals);
         // Metadata pruning indexes every row group's chunk list by ordinal, so with
         // it active the cross-check has to cover the whole file before it runs.
         // Without it, the only row groups ever indexed are those that become work
@@ -1411,6 +1412,22 @@ public class RowGroupIterator {
             ResolvedPredicate.collectColumnIndices(filter, touched);
         }
         return touched;
+    }
+
+    private void prepareProjectedMetadata(List<RowGroup> rowGroups,
+                                          FileColumnOrdinals columnOrdinals) {
+        if (!(rowGroups instanceof ProjectedColumnMetadata projectedMetadata)) {
+            return;
+        }
+        BitSet fileColumns = new BitSet();
+        for (int originalIndex = touchedColumns.nextSetBit(0); originalIndex >= 0;
+                originalIndex = touchedColumns.nextSetBit(originalIndex + 1)) {
+            int fileOrdinal = columnOrdinals.fileOrdinal(originalIndex);
+            if (fileOrdinal >= 0) {
+                fileColumns.set(fileOrdinal);
+            }
+        }
+        projectedMetadata.prepareColumns(fileColumns);
     }
 
     /// Validates the columns this read touches ([#touchedColumns]) against the
