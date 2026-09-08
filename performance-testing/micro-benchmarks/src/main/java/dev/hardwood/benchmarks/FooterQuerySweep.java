@@ -22,17 +22,19 @@ import dev.hardwood.schema.ColumnProjection;
 
 /// Runs a projection and filter-shape sweep over the four `parquet-footer-bench` datasets.
 ///
-/// Each cell reports the median of five full scans after one warmup. `plan_ms` includes opening
-/// the file and building column readers. `query_ms` includes that planning time and consuming
-/// every output batch, excluding reader close. Footer order rotates between cells.
+/// Every predicate lies above the column's maximum, so statistics eliminate all row groups. Each
+/// cell is therefore a complete zero-row query that exercises footer open, projected metadata
+/// preparation, statistics decoding, and row-group filtering without reading data pages.
+/// `query_ms` includes all of that work, excluding reader close. Each cell reports the median of
+/// 11 runs after three warmups, and footer order rotates between cells.
 ///
 /// Prepare an OSS, jump-table, and full modular file for every corpus entry, then run:
 /// ```shell
 /// java -cp target/benchmarks.jar dev.hardwood.benchmarks.FooterQuerySweep /path/to/data
 /// ```
 public final class FooterQuerySweep {
-    private static final int WARMUPS = 1;
-    private static final int RUNS = 5;
+    private static final int WARMUPS = 3;
+    private static final int RUNS = 11;
     private static final List<String> FOOTERS = List.of("oss", "jump", "modular");
 
     private record Dataset(String name, String filterColumn, String secondFilterColumn,
@@ -47,21 +49,20 @@ public final class FooterQuerySweep {
     }
 
     private static final List<Dataset> DATASETS = List.of(
-            new Dataset("us-accidents-00004-of-00007", "Severity", "State",
-                    () -> FilterPredicate.gt("Severity", 3L),
-                    () -> FilterPredicate.eq("State", "CA")),
-            new Dataset("fineweb-10bt-000", "token_count", "language",
-                    () -> FilterPredicate.gt("token_count", 5_000L),
-                    () -> FilterPredicate.eq("language", "en")),
-            new Dataset("hacker-news-00000-of-00039", "score", "type",
-                    () -> FilterPredicate.gt("score", 100L),
-                    () -> FilterPredicate.eq("type", "story")),
-            new Dataset("yellow-tripdata-2025-01", "fare_amount", "passenger_count",
-                    () -> FilterPredicate.gt("fare_amount", 100.0),
-                    () -> FilterPredicate.gt("passenger_count", 1L)));
+            new Dataset("us-accidents-00004-of-00007", "Severity", "Start_Lat",
+                    () -> FilterPredicate.gt("Severity", Long.MAX_VALUE),
+                    () -> FilterPredicate.gt("Start_Lat", Double.MAX_VALUE)),
+            new Dataset("fineweb-10bt-000", "token_count", "language_score",
+                    () -> FilterPredicate.gt("token_count", Long.MAX_VALUE),
+                    () -> FilterPredicate.gt("language_score", Double.MAX_VALUE)),
+            new Dataset("hacker-news-00000-of-00039", "score", "id",
+                    () -> FilterPredicate.gt("score", Long.MAX_VALUE),
+                    () -> FilterPredicate.gt("id", Long.MAX_VALUE)),
+            new Dataset("yellow-tripdata-2025-01", "fare_amount", "trip_distance",
+                    () -> FilterPredicate.gt("fare_amount", Double.MAX_VALUE),
+                    () -> FilterPredicate.gt("trip_distance", Double.MAX_VALUE)));
 
     private static final List<Shape> SHAPES = List.of(
-            new Shape("none", false, false, false),
             new Shape("filter_projected", true, false, false),
             new Shape("filter_unprojected", false, true, false),
             new Shape("two_filters_unprojected", false, true, true));
@@ -129,6 +130,9 @@ public final class FooterQuerySweep {
             if (expectedRecords >= 0 && result.records() != expectedRecords) {
                 throw new AssertionError("Record count changed for " + path);
             }
+            if (result.records() != 0) {
+                throw new AssertionError("Expected statistics to prune every row in " + path);
+            }
             expectedRecords = result.records();
         }
         Collections.sort(plans);
@@ -180,11 +184,8 @@ public final class FooterQuerySweep {
     }
 
     private static FilterPredicate predicate(Dataset dataset, Shape shape) {
-        if (shape.name().equals("none")) {
-            return null;
-        }
         return shape.twoFilters()
-                ? FilterPredicate.and(dataset.filter().get(), dataset.secondFilter().get())
+                ? FilterPredicate.or(dataset.filter().get(), dataset.secondFilter().get())
                 : dataset.filter().get();
     }
 
