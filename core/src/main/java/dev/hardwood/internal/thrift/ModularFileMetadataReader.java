@@ -657,7 +657,7 @@ public final class ModularFileMetadataReader {
                         Math.toIntExact(dictionaryIndex));
             }
             FieldPath path = schema.getColumn(column).fieldPath();
-            ColumnMetaData metadata = new ColumnMetaData(
+            ColumnMetaData metadata = ColumnMetaData.withLazyStatistics(
                     ThriftEnumLookup.physicalType(
                             Math.toIntExact(placement.physicalTypes.get(column))),
                     List.of(), path,
@@ -666,7 +666,7 @@ public final class ModularFileMetadataReader {
                     placement.numValues.get(chunk), placement.uncompressedSizes.get(chunk),
                     placement.compressedSizes.get(chunk), Map.of(),
                     placement.dataPageOffsets.get(chunk),
-                    dictionaryOffset, statistics.get(column, rowGroup), null, null, null,
+                    dictionaryOffset, () -> statistics.get(column, rowGroup), null, null, null,
                     List.of(), null);
             ColumnChunk created = new ColumnChunk(metadata, null, null, null, null, "");
             cache[column] = created;
