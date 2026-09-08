@@ -611,9 +611,9 @@ public final class ModularFileMetadataReader {
         }
 
         @Override
-        public void prepareColumns(BitSet columns) {
-            for (int rowGroup = 0; rowGroup < cache.length; rowGroup++) {
-                List<ColumnChunk> chunks = get(rowGroup).columns();
+        public void prepareColumns(BitSet columns, List<RowGroup> rowGroups) {
+            for (RowGroup rowGroup : rowGroups) {
+                List<ColumnChunk> chunks = rowGroup.columns();
                 for (int column = columns.nextSetBit(0); column >= 0;
                         column = columns.nextSetBit(column + 1)) {
                     chunks.get(column);
