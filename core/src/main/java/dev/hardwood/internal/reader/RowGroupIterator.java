@@ -408,9 +408,10 @@ public class RowGroupIterator {
                     "rg=" + workItem.rowGroupIndex() + " indexes")) {
                 requireSameFile(workItem);
                 boolean pageFiltering = filterPredicate != null && metadataFilteringEnabled;
+                BitSet fileColumns = fileTouchedColumns(workItem.columnOrdinals());
                 RowGroupIndexBuffers indexBuffers = RowGroupIndexBuffers.fetch(
                         workItem.inputFile(), workItem.rowGroup(),
-                        pageFiltering);
+                        pageFiltering, fileColumns);
 
                 RowRanges matchingRows = RowRanges.ALL;
                 if (pageFiltering) {
@@ -445,9 +446,11 @@ public class RowGroupIterator {
     /// chunk pointing elsewhere misplaces the region for the rest.
     ///
     /// @throws UnsupportedOperationException if any chunk names another file
-    private static void requireSameFile(WorkItem workItem) {
+    private void requireSameFile(WorkItem workItem) {
         List<ColumnChunk> columns = workItem.rowGroup().columns();
-        for (int i = 0; i < columns.size(); i++) {
+        BitSet fileColumns = fileTouchedColumns(workItem.columnOrdinals());
+        for (int i = fileColumns.nextSetBit(0); i >= 0;
+                i = fileColumns.nextSetBit(i + 1)) {
             try {
                 columns.get(i).requireSameFile();
             }
@@ -461,6 +464,18 @@ public class RowGroupIterator {
                         + workItem.rowGroupIndex() + ": " + e.getMessage(), e);
             }
         }
+    }
+
+    private BitSet fileTouchedColumns(FileColumnOrdinals columnOrdinals) {
+        BitSet fileColumns = new BitSet();
+        for (int originalIndex = touchedColumns.nextSetBit(0); originalIndex >= 0;
+                originalIndex = touchedColumns.nextSetBit(originalIndex + 1)) {
+            int fileOrdinal = columnOrdinals.fileOrdinal(originalIndex);
+            if (fileOrdinal >= 0) {
+                fileColumns.set(fileOrdinal);
+            }
+        }
+        return fileColumns;
     }
 
     /// Sets the tail-skip budget for the first row group's fetch plans.
