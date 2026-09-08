@@ -42,7 +42,7 @@ allocation profiling, `-rf json -rff out.json` for machine-readable results,
 | `PageHandlingBenchmark` | Per-page decompression vs. full page decode | taxi data, downloaded by `./mvnw verify -Pperformance-test` |
 | `MemoryMapBenchmark` | Raw I/O floor: mmap + copy of a whole file, no decode | taxi data, downloaded by `./mvnw verify -Pperformance-test` |
 | `FooterRepresentationBenchmark` | Footer initialization and the same filtered query through OSS, jump-table, and modular footers | US Accidents corpus from `parquet-footer-bench` |
-| `FooterQuerySweep` | Planning and first-batch time across projection widths and filter shapes for three footer representations | four-file corpus from `parquet-footer-bench` |
+| `FooterQuerySweep` | Planning and full-query time across projection widths and filter shapes for three footer representations | four-file corpus from `parquet-footer-bench` |
 | `FixedSizeListDecodeBenchmark` | Fixed-size-list fast path vs. general list decode across vector widths | `generate_fixed_size_list_data.py` |
 | `FixedSizeListFallbackBenchmark` | Detector cost on almost-fixed-width pages that fall back | `generate_fixed_size_list_data.py` |
 | `nested/NestedListReadBenchmark` | `LIST<primitive>` reads across element types and null densities vs. a flat floor | self-generating (`NestedListFileGenerator`) |

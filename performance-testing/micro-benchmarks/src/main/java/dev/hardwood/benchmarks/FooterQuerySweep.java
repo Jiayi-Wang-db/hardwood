@@ -22,17 +22,17 @@ import dev.hardwood.schema.ColumnProjection;
 
 /// Runs a projection and filter-shape sweep over the four `parquet-footer-bench` datasets.
 ///
-/// Each cell reports the median of 11 runs after three warmups. `plan_ms` includes opening the
-/// file and building column readers. `first_batch_ms` measures producing the first batch of at
-/// most 8,192 rows, excluding reader close. Footer order rotates between cells.
+/// Each cell reports the median of five full scans after one warmup. `plan_ms` includes opening
+/// the file and building column readers. `query_ms` includes that planning time and consuming
+/// every output batch, excluding reader close. Footer order rotates between cells.
 ///
 /// Prepare an OSS, jump-table, and full modular file for every corpus entry, then run:
 /// ```shell
 /// java -cp target/benchmarks.jar dev.hardwood.benchmarks.FooterQuerySweep /path/to/data
 /// ```
 public final class FooterQuerySweep {
-    private static final int WARMUPS = 3;
-    private static final int RUNS = 11;
+    private static final int WARMUPS = 1;
+    private static final int RUNS = 5;
     private static final List<String> FOOTERS = List.of("oss", "jump", "modular");
 
     private record Dataset(String name, String filterColumn, String secondFilterColumn,
@@ -43,7 +43,7 @@ public final class FooterQuerySweep {
             boolean twoFilters) {
     }
 
-    private record Result(double planMs, double firstBatchMs, int records) {
+    private record Result(double planMs, double queryMs, long records) {
     }
 
     private static final List<Dataset> DATASETS = List.of(
@@ -76,7 +76,7 @@ public final class FooterQuerySweep {
         }
         Path data = Path.of(args[0]);
         System.out.println("dataset,columns,projection,projected,shape,footer,plan_ms,"
-                + "first_batch_ms,records");
+                + "query_ms,records");
         int cell = 0;
         for (Dataset dataset : DATASETS) {
             if (args.length == 2 && !dataset.name().equals(args[1])) {
@@ -105,7 +105,7 @@ public final class FooterQuerySweep {
                         System.out.printf(Locale.ROOT,
                                 "%s,%d,%s,%d,%s,%s,%.3f,%.3f,%d%n",
                                 dataset.name(), columns.size(), labels[width], projection.length,
-                                shape.name(), footer, result.planMs(), result.firstBatchMs(),
+                                shape.name(), footer, result.planMs(), result.queryMs(),
                                 result.records());
                     }
                     cell++;
@@ -120,20 +120,20 @@ public final class FooterQuerySweep {
             run(path, projection, filter);
         }
         List<Double> plans = new ArrayList<>();
-        List<Double> batches = new ArrayList<>();
-        int expectedRecords = -1;
+        List<Double> queries = new ArrayList<>();
+        long expectedRecords = -1;
         for (int i = 0; i < RUNS; i++) {
             Result result = run(path, projection, filter);
             plans.add(result.planMs());
-            batches.add(result.firstBatchMs());
+            queries.add(result.queryMs());
             if (expectedRecords >= 0 && result.records() != expectedRecords) {
                 throw new AssertionError("Record count changed for " + path);
             }
             expectedRecords = result.records();
         }
         Collections.sort(plans);
-        Collections.sort(batches);
-        return new Result(plans.get(RUNS / 2), batches.get(RUNS / 2), expectedRecords);
+        Collections.sort(queries);
+        return new Result(plans.get(RUNS / 2), queries.get(RUNS / 2), expectedRecords);
     }
 
     private static Result run(Path path, String[] projection, FilterPredicate filter)
@@ -141,7 +141,7 @@ public final class FooterQuerySweep {
         long start = System.nanoTime();
         long planned;
         long finished;
-        int records;
+        long records = 0;
         try (ParquetFileReader file = open(path)) {
             var builder = file.buildColumnReaders(ColumnProjection.columns(projection));
             if (filter != null) {
@@ -149,12 +149,14 @@ public final class FooterQuerySweep {
             }
             try (ColumnReaders readers = builder.batchSize(8_192).build()) {
                 planned = System.nanoTime();
-                records = readers.nextBatch() ? readers.getRecordCount() : 0;
+                while (readers.nextBatch()) {
+                    records += readers.getRecordCount();
+                }
                 finished = System.nanoTime();
             }
         }
         return new Result((planned - start) / 1_000_000.0,
-                (finished - planned) / 1_000_000.0, records);
+                (finished - start) / 1_000_000.0, records);
     }
 
     private static String[] projection(List<String> columns, int width, Dataset dataset,
