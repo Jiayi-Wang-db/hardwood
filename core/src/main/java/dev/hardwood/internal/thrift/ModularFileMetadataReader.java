@@ -192,7 +192,7 @@ public final class ModularFileMetadataReader {
     }
 
     private static Placement readPlacement(ThriftCompactReader reader, Root root) {
-        long[][] fields = new long[9][];
+        PackedIntegerArray[] fields = new PackedIntegerArray[9];
         short saved = reader.pushFieldIdContext();
         try {
             while (true) {
@@ -202,7 +202,7 @@ public final class ModularFileMetadataReader {
                 }
                 int id = ThriftCompactReader.fieldId(field);
                 if (id >= 1 && id <= 9 && reader.acceptField(field, Codes.STRUCT)) {
-                    fields[id - 1] = readArray(reader).integers();
+                    fields[id - 1] = readPackedIntegerArray(reader);
                 }
                 else {
                     reader.skipField(ThriftCompactReader.fieldType(field));
@@ -345,11 +345,23 @@ public final class ModularFileMetadataReader {
         return readArrayPage(reader, false);
     }
 
+    private static PackedIntegerArray readPackedIntegerArray(ThriftCompactReader reader) {
+        EncodedArray encoded = readEncodedArray(reader);
+        return new PackedIntegerArray(encoded.data, encoded.count, encoded.parameters);
+    }
+
     private static ArrayData readByteArray(ThriftCompactReader reader) {
         return readArrayPage(reader, true);
     }
 
     private static ArrayData readArrayPage(ThriftCompactReader reader, boolean byteValues) {
+        EncodedArray encoded = readEncodedArray(reader);
+        return byteValues
+                ? ArrayData.decodeBytes(encoded.data, encoded.count, encoded.parameters)
+                : ArrayData.decodeIntegers(encoded.data, encoded.count, encoded.parameters);
+    }
+
+    private static EncodedArray readEncodedArray(ThriftCompactReader reader) {
         byte[] data = null;
         int encoding = -1;
         int count = -1;
@@ -384,9 +396,7 @@ public final class ModularFileMetadataReader {
         if (data == null || count < 0 || parameters == null || encoding != parameters.encoding) {
             throw malformed("invalid ArrayPage");
         }
-        return byteValues
-                ? ArrayData.decodeBytes(data, count, parameters)
-                : ArrayData.decodeIntegers(data, count, parameters);
+        return new EncodedArray(data, count, parameters);
     }
 
     private static Parameters readParameters(ThriftCompactReader reader) {
@@ -522,6 +532,12 @@ public final class ModularFileMetadataReader {
         }
     }
 
+    private static void requireLength(PackedIntegerArray values, int expected, String name) {
+        if (values == null || values.size() != expected) {
+            throw malformed(name + " must contain " + expected + " values");
+        }
+    }
+
     private static Long integerAt(ArrayData data, int index) {
         return data == null || !data.present[index] ? null : data.integers[index];
     }
@@ -580,7 +596,7 @@ public final class ModularFileMetadataReader {
             for (int column = 0; column < root.numColumns; column++) {
                 int chunk = column * root.numRowGroups + index;
                 totalByteSize = Math.addExact(
-                        totalByteSize, decodedPlacement.uncompressedSizes[chunk]);
+                        totalByteSize, decodedPlacement.uncompressedSizes.get(chunk));
             }
             RowGroup created = new RowGroup(
                     new ModularColumns(root, schema, decodedPlacement, statistics, index),
@@ -634,20 +650,22 @@ public final class ModularFileMetadataReader {
                 return existing;
             }
             int chunk = column * root.numRowGroups + rowGroup;
-            long dictionaryIndex = placement.firstDictionaryPages[chunk];
+            long dictionaryIndex = placement.firstDictionaryPages.get(chunk);
             Long dictionaryOffset = null;
-            if (placement.firstDictionaryPages[chunk + 1] != dictionaryIndex) {
-                dictionaryOffset = placement.dictionaryPageOffsets[Math.toIntExact(dictionaryIndex)];
+            if (placement.firstDictionaryPages.get(chunk + 1) != dictionaryIndex) {
+                dictionaryOffset = placement.dictionaryPageOffsets.get(
+                        Math.toIntExact(dictionaryIndex));
             }
             FieldPath path = schema.getColumn(column).fieldPath();
             ColumnMetaData metadata = new ColumnMetaData(
                     ThriftEnumLookup.physicalType(
-                            Math.toIntExact(placement.physicalTypes[column])),
+                            Math.toIntExact(placement.physicalTypes.get(column))),
                     List.of(), path,
                     ThriftEnumLookup.compressionCodec(
-                            Math.toIntExact(placement.codecs[chunk])),
-                    placement.numValues[chunk], placement.uncompressedSizes[chunk],
-                    placement.compressedSizes[chunk], Map.of(), placement.dataPageOffsets[chunk],
+                            Math.toIntExact(placement.codecs.get(chunk))),
+                    placement.numValues.get(chunk), placement.uncompressedSizes.get(chunk),
+                    placement.compressedSizes.get(chunk), Map.of(),
+                    placement.dataPageOffsets.get(chunk),
                     dictionaryOffset, statistics.get(column, rowGroup), null, null, null,
                     List.of(), null);
             ColumnChunk created = new ColumnChunk(metadata, null, null, null, null, "");
@@ -710,10 +728,14 @@ public final class ModularFileMetadataReader {
     private record Location(long offset, long length) {
     }
 
-    private record Placement(long[] dataPageOffsets, long[] firstDictionaryPages,
-                             long[] dictionaryPageOffsets, long[] compressedSizes,
-                             long[] uncompressedSizes, long[] numValues, long[] codecs,
-                             long[] physicalTypes) {
+    private record Placement(PackedIntegerArray dataPageOffsets,
+                             PackedIntegerArray firstDictionaryPages,
+                             PackedIntegerArray dictionaryPageOffsets,
+                             PackedIntegerArray compressedSizes,
+                             PackedIntegerArray uncompressedSizes,
+                             PackedIntegerArray numValues,
+                             PackedIntegerArray codecs,
+                             PackedIntegerArray physicalTypes) {
     }
 
     private static final class PlacementSource {
@@ -740,6 +762,43 @@ public final class ModularFileMetadataReader {
     }
 
     private record Parameters(int encoding, int present, int positionWidth, int valueWidth) {
+    }
+
+    private record EncodedArray(byte[] data, int count, Parameters parameters) {
+    }
+
+    /// Dense integer ArrayPage retained in its bit-packed representation. Placement arrays are
+    /// required and dense, so one selected value can be addressed without expanding its siblings.
+    private record PackedIntegerArray(byte[] data, int count, Parameters parameters) {
+        private PackedIntegerArray {
+            if (parameters.present != count) {
+                throw malformed("placement array contains absent values");
+            }
+        }
+
+        private int size() {
+            return count;
+        }
+
+        private long get(int index) {
+            Objects.checkIndex(index, count);
+            if (parameters.encoding == 0) {
+                return ArrayData.unpack(data,
+                        Math.multiplyExact(index, parameters.valueWidth),
+                        parameters.valueWidth);
+            }
+            long position = ArrayData.unpack(data,
+                    Math.multiplyExact(index, parameters.positionWidth),
+                    parameters.positionWidth);
+            if (position != index) {
+                throw malformed("dense placement array has non-identity positions");
+            }
+            int valueStart = ArrayData.roundToByte(
+                    Math.multiplyExact(count, parameters.positionWidth));
+            return ArrayData.unpack(data,
+                    Math.addExact(valueStart, Math.multiplyExact(index, parameters.valueWidth)),
+                    parameters.valueWidth);
+        }
     }
 
     private record ArrayData(long[] integers, byte[][] bytes, boolean[] present) {
