@@ -20,9 +20,12 @@ complete data file.
 ## Reader
 
 Footer detection remains internal to the metadata reader. `PAR1` files follow the standard path;
-`MFP1` files load the modular root, schema, placement, file metadata, and row-group statistics and
-adapt them to Hardwood's existing metadata records. The page reader then follows the original
-column-chunk offsets and reads the unchanged data pages normally.
+`MFP1` files load the modular root, schema, placement, and descriptive file metadata. Placement
+stays in its packed column-major arrays. Row groups and column chunks are lazy list views over
+those arrays, so only columns reached by projection, filtering, or metadata inspection create the
+existing boundary records. Row-group statistics remain independently encoded and one column is
+decoded only when a consumer first requests a chunk from that column. The page reader then follows
+the original column-chunk offsets and reads the unchanged data pages normally.
 
 Metadata absent from the modular representation uses conservative defaults. In particular,
 missing encoding statistics disable dictionary-based row-group pruning, and missing page-index

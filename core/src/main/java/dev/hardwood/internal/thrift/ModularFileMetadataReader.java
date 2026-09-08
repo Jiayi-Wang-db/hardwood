@@ -9,11 +9,12 @@ package dev.hardwood.internal.thrift;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
+import java.util.AbstractList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import dev.hardwood.InputFile;
 import dev.hardwood.internal.FetchReason;
@@ -42,55 +43,25 @@ public final class ModularFileMetadataReader {
     public static FileMetaData read(InputFile inputFile, long modularStart, long rootOffset,
             long metadataEnd) throws IOException {
         requireRange(modularStart, rootOffset, metadataEnd, "modular root");
-        ByteBuffer rootBytes = fetch(inputFile, modularStart + rootOffset,
-                Math.toIntExact(metadataEnd - modularStart - rootOffset), "modular-root");
-        Root root = readRoot(new ThriftCompactReader(rootBytes));
+        int metadataLength = Math.toIntExact(metadataEnd - modularStart);
+        ByteBuffer metadata = fetch(inputFile, modularStart, metadataLength, "modular-footer");
+        Root root = readRoot(reader(metadata, rootOffset, metadataLength - rootOffset,
+                "modular root"));
         Location schemaLocation = required(root.modules, SCHEMA, "schema");
         Location placementLocation = required(root.modules, PLACEMENT, "placement");
-        List<SchemaElement> schema = readSchema(module(inputFile, modularStart, metadataEnd,
-                schemaLocation, "modular-schema"));
+        List<SchemaElement> schema = readSchema(module(metadata, schemaLocation, "modular-schema"));
         FileSchema fileSchema = FileSchema.fromSchemaElements(schema);
         if (fileSchema.getColumnCount() != root.numColumns) {
             throw malformed("schema has " + fileSchema.getColumnCount() + " leaf columns, root has "
                     + root.numColumns);
         }
-        Placement placement = readPlacement(module(inputFile, modularStart, metadataEnd,
-                placementLocation, "modular-placement"), root);
-        Statistics[][] statistics = readStatistics(inputFile, modularStart, metadataEnd, root);
-        FileDetails details = readFileDetails(inputFile, modularStart, metadataEnd, root);
-        List<RowGroup> rowGroups = buildRowGroups(root, fileSchema, placement, statistics);
+        Placement placement = readPlacement(
+                module(metadata, placementLocation, "modular-placement"), root);
+        StatisticsSource statistics = readStatistics(metadata, root);
+        FileDetails details = readFileDetails(metadata, root);
+        List<RowGroup> rowGroups = new ModularRowGroups(root, fileSchema, placement, statistics);
         return new FileMetaData(root.version, schema, root.numRows, rowGroups,
                 details.keyValues, details.createdBy, List.of());
-    }
-
-    private static List<RowGroup> buildRowGroups(Root root, FileSchema schema,
-            Placement placement, Statistics[][] statistics) {
-        List<RowGroup> groups = new ArrayList<>(root.numRowGroups);
-        for (int group = 0; group < root.numRowGroups; group++) {
-            List<ColumnChunk> chunks = new ArrayList<>(root.numColumns);
-            long totalByteSize = 0;
-            for (int column = 0; column < root.numColumns; column++) {
-                int chunk = column * root.numRowGroups + group;
-                Long dictionaryOffset = null;
-                long dictionaryIndex = placement.firstDictionaryPages[chunk];
-                if (placement.firstDictionaryPages[chunk + 1] != dictionaryIndex) {
-                    dictionaryOffset = placement.dictionaryPageOffsets[Math.toIntExact(dictionaryIndex)];
-                }
-                totalByteSize = Math.addExact(totalByteSize, placement.uncompressedSizes[chunk]);
-                FieldPath path = schema.getColumn(column).fieldPath();
-                ColumnMetaData metadata = new ColumnMetaData(
-                        ThriftEnumLookup.physicalType(Math.toIntExact(placement.physicalTypes[column])),
-                        List.of(), path,
-                        ThriftEnumLookup.compressionCodec(Math.toIntExact(placement.codecs[chunk])),
-                        placement.numValues[chunk], placement.uncompressedSizes[chunk],
-                        placement.compressedSizes[chunk], Map.of(), placement.dataPageOffsets[chunk],
-                        dictionaryOffset, statistics[column][group], null, null, null, List.of(), null);
-                chunks.add(new ColumnChunk(metadata, null, null, null, null, ""));
-            }
-            groups.add(new RowGroup(Collections.unmodifiableList(chunks), totalByteSize,
-                    root.rowGroupNumRows[group]));
-        }
-        return Collections.unmodifiableList(groups);
     }
 
     private static Root readRoot(ThriftCompactReader reader) {
@@ -252,15 +223,13 @@ public final class ModularFileMetadataReader {
                 fields[6], fields[7]);
     }
 
-    private static Statistics[][] readStatistics(InputFile inputFile, long modularStart,
-            long metadataEnd, Root root) throws IOException {
-        Statistics[][] result = new Statistics[root.numColumns][root.numRowGroups];
+    private static StatisticsSource readStatistics(ByteBuffer metadata, Root root) {
         Location location = root.modules.get(ROW_GROUP_STATISTICS);
         if (location == null) {
-            return result;
+            return new StatisticsSource(metadata, root.numColumns, root.numRowGroups, null);
         }
-        ThriftCompactReader directory = module(inputFile, modularStart, metadataEnd, location,
-                "modular-statistics-directory");
+        ThriftCompactReader directory = module(
+                metadata, location, "modular-statistics-directory");
         long[] offsets = null;
         short saved = directory.pushFieldIdContext();
         try {
@@ -282,17 +251,7 @@ public final class ModularFileMetadataReader {
             directory.popFieldIdContext(saved);
         }
         requireLength(offsets, root.numColumns + 1, "column_offsets");
-        for (int column = 0; column < root.numColumns; column++) {
-            long length = offsets[column + 1] - offsets[column];
-            if (length > 0) {
-                requireRange(modularStart, offsets[column], metadataEnd,
-                        "column statistics offset");
-                ByteBuffer bytes = fetch(inputFile, modularStart + offsets[column],
-                        Math.toIntExact(length), "modular-column-statistics");
-                readColumnStatistics(new ThriftCompactReader(bytes), result[column]);
-            }
-        }
-        return result;
+        return new StatisticsSource(metadata, root.numColumns, root.numRowGroups, offsets);
     }
 
     private static void readColumnStatistics(ThriftCompactReader reader, Statistics[] output) {
@@ -346,14 +305,12 @@ public final class ModularFileMetadataReader {
         }
     }
 
-    private static FileDetails readFileDetails(InputFile inputFile, long modularStart,
-            long metadataEnd, Root root) throws IOException {
+    private static FileDetails readFileDetails(ByteBuffer metadata, Root root) {
         Location location = root.modules.get(FILE_METADATA);
         if (location == null) {
             return new FileDetails(null, Map.of());
         }
-        ThriftCompactReader reader = module(inputFile, modularStart, metadataEnd, location,
-                "modular-file-metadata");
+        ThriftCompactReader reader = module(metadata, location, "modular-file-metadata");
         String createdBy = null;
         Map<String, String> keyValues = Map.of();
         short saved = reader.pushFieldIdContext();
@@ -522,14 +479,19 @@ public final class ModularFileMetadataReader {
         return values;
     }
 
-    private static ThriftCompactReader module(InputFile inputFile, long modularStart,
-            long metadataEnd, Location location, String reason) throws IOException {
-        requireRange(modularStart, location.offset, metadataEnd, reason);
-        if (location.length > metadataEnd - modularStart - location.offset) {
-            throw malformed(reason + " exceeds metadata bounds");
+    private static ThriftCompactReader module(ByteBuffer metadata, Location location,
+            String name) {
+        return reader(metadata, location.offset, location.length, name);
+    }
+
+    private static ThriftCompactReader reader(ByteBuffer metadata, long offset, long length,
+            String name) {
+        if (offset < 0 || length < 0 || offset > metadata.limit()
+                || length > metadata.limit() - offset) {
+            throw malformed(name + " exceeds metadata bounds");
         }
-        return new ThriftCompactReader(fetch(inputFile, modularStart + location.offset,
-                Math.toIntExact(location.length), reason));
+        ByteBuffer view = metadata.slice(Math.toIntExact(offset), Math.toIntExact(length));
+        return new ThriftCompactReader(view);
     }
 
     private static ByteBuffer fetch(InputFile inputFile, long offset, int length, String reason)
@@ -584,6 +546,146 @@ public final class ModularFileMetadataReader {
 
     private static ParquetReadException malformed(String message) {
         return new ParquetReadException("Malformed modular footer: " + message);
+    }
+
+    /// Row-group metadata backed by the modular placement arrays. A row-group record is created
+    /// only when planning reaches it; its column chunks remain lazy after that.
+    private static final class ModularRowGroups extends AbstractList<RowGroup> {
+        private final Root root;
+        private final FileSchema schema;
+        private final Placement placement;
+        private final StatisticsSource statistics;
+        private final RowGroup[] cache;
+
+        private ModularRowGroups(Root root, FileSchema schema, Placement placement,
+                StatisticsSource statistics) {
+            this.root = root;
+            this.schema = schema;
+            this.placement = placement;
+            this.statistics = statistics;
+            this.cache = new RowGroup[root.numRowGroups];
+        }
+
+        @Override
+        public synchronized RowGroup get(int index) {
+            Objects.checkIndex(index, cache.length);
+            RowGroup existing = cache[index];
+            if (existing != null) {
+                return existing;
+            }
+            long totalByteSize = 0;
+            for (int column = 0; column < root.numColumns; column++) {
+                int chunk = column * root.numRowGroups + index;
+                totalByteSize = Math.addExact(totalByteSize, placement.uncompressedSizes[chunk]);
+            }
+            RowGroup created = new RowGroup(
+                    new ModularColumns(root, schema, placement, statistics, index),
+                    totalByteSize, root.rowGroupNumRows[index]);
+            cache[index] = created;
+            return created;
+        }
+
+        @Override
+        public int size() {
+            return cache.length;
+        }
+    }
+
+    /// Column chunks are adapted at the final page-reader boundary rather than reconstructed for
+    /// every column and row group while opening the footer.
+    private static final class ModularColumns extends AbstractList<ColumnChunk> {
+        private final Root root;
+        private final FileSchema schema;
+        private final Placement placement;
+        private final StatisticsSource statistics;
+        private final int rowGroup;
+        private final ColumnChunk[] cache;
+
+        private ModularColumns(Root root, FileSchema schema, Placement placement,
+                StatisticsSource statistics, int rowGroup) {
+            this.root = root;
+            this.schema = schema;
+            this.placement = placement;
+            this.statistics = statistics;
+            this.rowGroup = rowGroup;
+            this.cache = new ColumnChunk[root.numColumns];
+        }
+
+        @Override
+        public synchronized ColumnChunk get(int column) {
+            Objects.checkIndex(column, cache.length);
+            ColumnChunk existing = cache[column];
+            if (existing != null) {
+                return existing;
+            }
+            int chunk = column * root.numRowGroups + rowGroup;
+            long dictionaryIndex = placement.firstDictionaryPages[chunk];
+            Long dictionaryOffset = null;
+            if (placement.firstDictionaryPages[chunk + 1] != dictionaryIndex) {
+                dictionaryOffset = placement.dictionaryPageOffsets[Math.toIntExact(dictionaryIndex)];
+            }
+            FieldPath path = schema.getColumn(column).fieldPath();
+            ColumnMetaData metadata = new ColumnMetaData(
+                    ThriftEnumLookup.physicalType(
+                            Math.toIntExact(placement.physicalTypes[column])),
+                    List.of(), path,
+                    ThriftEnumLookup.compressionCodec(
+                            Math.toIntExact(placement.codecs[chunk])),
+                    placement.numValues[chunk], placement.uncompressedSizes[chunk],
+                    placement.compressedSizes[chunk], Map.of(), placement.dataPageOffsets[chunk],
+                    dictionaryOffset, statistics.get(column, rowGroup), null, null, null,
+                    List.of(), null);
+            ColumnChunk created = new ColumnChunk(metadata, null, null, null, null, "");
+            cache[column] = created;
+            return created;
+        }
+
+        @Override
+        public int size() {
+            return cache.length;
+        }
+    }
+
+    /// Independently encoded statistics descriptors stay encoded until a query touches their
+    /// column. Decoding one column populates all its row groups, matching the modular lifecycle.
+    private static final class StatisticsSource {
+        private final ByteBuffer metadata;
+        private final int rowGroups;
+        private final long[] offsets;
+        private final Statistics[][] columns;
+        private final boolean[] decoded;
+
+        private StatisticsSource(ByteBuffer metadata, int columnCount, int rowGroups,
+                long[] offsets) {
+            this.metadata = metadata;
+            this.rowGroups = rowGroups;
+            this.offsets = offsets;
+            this.columns = new Statistics[columnCount][];
+            this.decoded = new boolean[columnCount];
+        }
+
+        private synchronized Statistics get(int column, int rowGroup) {
+            if (!decoded[column]) {
+                decode(column);
+            }
+            return columns[column][rowGroup];
+        }
+
+        private void decode(int column) {
+            if (decoded[column]) {
+                return;
+            }
+            Statistics[] values = new Statistics[rowGroups];
+            if (offsets != null) {
+                long length = offsets[column + 1] - offsets[column];
+                if (length > 0) {
+                    readColumnStatistics(reader(metadata, offsets[column], length,
+                            "modular-column-statistics"), values);
+                }
+            }
+            columns[column] = values;
+            decoded[column] = true;
+        }
     }
 
     private record Root(int version, int numRowGroups, int numColumns, long numRows,
@@ -687,14 +789,18 @@ public final class ModularFileMetadataReader {
             if (bitOffset < 0 || width < 0 || bitOffset > data.length * 8 - width) {
                 throw malformed("bit-packed array exceeds its payload");
             }
-            long value = 0;
-            for (int bit = 0; bit < width; bit++) {
-                int source = bitOffset + bit;
-                if ((data[source >>> 3] & (1 << (source & 7))) != 0) {
-                    value |= 1L << bit;
-                }
+            if (width == 0) {
+                return 0;
             }
-            return value;
+            int byteIndex = bitOffset >>> 3;
+            int sourceShift = bitOffset & 7;
+            long value = (data[byteIndex] & 0xFFL) >>> sourceShift;
+            int decodedBits = 8 - sourceShift;
+            while (decodedBits < width) {
+                value |= (data[++byteIndex] & 0xFFL) << decodedBits;
+                decodedBits += 8;
+            }
+            return width == Long.SIZE ? value : value & ((1L << width) - 1);
         }
     }
 }
