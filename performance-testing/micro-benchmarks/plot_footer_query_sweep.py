@@ -22,10 +22,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv", type=Path)
     parser.add_argument("svg", type=Path)
+    parser.add_argument("--kind", choices=("pruned", "selective"), default="pruned")
     args = parser.parse_args()
 
     rows = list(csv.DictReader(args.csv.open()))
-    selected = [row for row in rows if row["shape"] == "filter_unprojected"]
+    selected = [row for row in rows
+                if row["query_kind"] == args.kind and row["shape"] == "filter_unprojected"]
     grouped = defaultdict(list)
     for row in selected:
         grouped[row["dataset"]].append(row)
@@ -44,9 +46,8 @@ def main():
         ".grid { stroke: #e2e8f0; stroke-width: 1; }",
         "</style>",
         '<rect width="1200" height="790" fill="#ffffff" rx="12"/>',
-        '<text class="title" x="54" y="43">Full queries dominated by footer work</text>',
-        '<text class="subtitle" x="54" y="68">One unprojected filter column; all row groups '
-        'are eliminated by statistics, so no data pages are read.</text>',
+        f'<text class="title" x="54" y="43">{title(args.kind)}</text>',
+        f'<text class="subtitle" x="54" y="68">{subtitle(args.kind)}</text>',
     ]
 
     legend_x = 760
@@ -63,6 +64,20 @@ def main():
                  'Projected output columns (filter column is additional and not returned)</text>')
     parts.append("</svg>")
     args.svg.write_text("\n".join(parts) + "\n")
+
+
+def title(kind):
+    if kind == "selective":
+        return "Selective full queries with real data scans"
+    return "Full queries dominated by footer work"
+
+
+def subtitle(kind):
+    if kind == "selective":
+        return ("One unprojected filter column; statistics prune most row groups and the "
+                "survivors are scanned to completion.")
+    return ("One unprojected filter column; all row groups are eliminated by statistics, "
+            "so no data pages are read.")
 
 
 def render_panel(parts, panel, dataset, rows):
@@ -84,8 +99,8 @@ def render_panel(parts, panel, dataset, rows):
                  'fill="#f8fafc" stroke="#e2e8f0"/>')
     parts.append(f'<text class="panel-title" x="{left + 20}" y="{top + 28}">'
                  f'{html.escape(DATASET_LABELS[dataset])}</text>')
-    parts.append(f'<text class="subtitle" x="{left + 20}" y="{top + 49}">Filter: '
-                 f'{html.escape(filter_name)} | modular stats: 1 column | jump stats: N + 1</text>')
+    parts.append(f'<text class="subtitle" x="{left + 20}" y="{top + 49}">'
+                 f'Filter column: {html.escape(filter_name)} (not projected)</text>')
 
     for tick in range(5):
         value = maximum * tick / 4

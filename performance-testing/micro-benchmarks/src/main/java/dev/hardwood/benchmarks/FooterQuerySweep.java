@@ -24,24 +24,28 @@ import dev.hardwood.schema.ColumnProjection;
 
 /// Runs a projection and filter-shape sweep over the four `parquet-footer-bench` datasets.
 ///
-/// Every predicate lies above the column's maximum, so statistics eliminate all row groups. Each
-/// cell is therefore a complete zero-row query that exercises footer open, projected metadata
-/// preparation, statistics decoding, and row-group filtering without reading data pages.
-/// `query_ms` includes all of that work, excluding reader close. Each cell reports the median of
-/// 11 runs after three warmups, and footer order rotates between cells.
+/// The default `pruned` mode uses predicates above each column's maximum, producing complete
+/// zero-row queries without data-page reads. The `selective` mode uses real predicates that prune
+/// most row groups and scan the survivors. `query_ms` includes footer open, planning, and consuming
+/// all results, excluding reader close. Footer order rotates between cells.
 ///
 /// Prepare an OSS, jump-table, and full modular file for every corpus entry, then run:
 /// ```shell
-/// java -Dfooter.sweep.output=results.csv -cp target/benchmarks.jar \
+/// java -Dfooter.sweep.mode=selective -Dfooter.sweep.output=results.csv \
+///   -cp target/benchmarks.jar \
 ///   dev.hardwood.benchmarks.FooterQuerySweep /path/to/data
 /// ```
 public final class FooterQuerySweep {
-    private static final int WARMUPS = 3;
-    private static final int RUNS = 11;
+    private static final int PRUNED_WARMUPS = 3;
+    private static final int PRUNED_RUNS = 11;
+    private static final int SELECTIVE_WARMUPS = 1;
+    private static final int SELECTIVE_RUNS = 5;
     private static final List<String> FOOTERS = List.of("oss", "jump", "modular");
 
     private record Dataset(String name, String filterColumn, String secondFilterColumn,
-            Supplier<FilterPredicate> filter, Supplier<FilterPredicate> secondFilter) {
+            Supplier<FilterPredicate> pruningFilter,
+            Supplier<FilterPredicate> secondPruningFilter,
+            Supplier<FilterPredicate> selectiveFilter) {
     }
 
     private record Shape(String name, boolean projectFilter, boolean excludeFilter,
@@ -54,16 +58,20 @@ public final class FooterQuerySweep {
     private static final List<Dataset> DATASETS = List.of(
             new Dataset("us-accidents-00004-of-00007", "Severity", "Start_Lat",
                     () -> FilterPredicate.gt("Severity", Long.MAX_VALUE),
-                    () -> FilterPredicate.gt("Start_Lat", Double.MAX_VALUE)),
+                    () -> FilterPredicate.gt("Start_Lat", Double.MAX_VALUE),
+                    () -> FilterPredicate.gt("Severity", 3L)),
             new Dataset("fineweb-10bt-000", "token_count", "language_score",
                     () -> FilterPredicate.gt("token_count", Long.MAX_VALUE),
-                    () -> FilterPredicate.gt("language_score", Double.MAX_VALUE)),
+                    () -> FilterPredicate.gt("language_score", Double.MAX_VALUE),
+                    () -> FilterPredicate.gt("token_count", 5_000L)),
             new Dataset("hacker-news-00000-of-00039", "score", "id",
                     () -> FilterPredicate.gt("score", Long.MAX_VALUE),
-                    () -> FilterPredicate.gt("id", Long.MAX_VALUE)),
+                    () -> FilterPredicate.gt("id", Long.MAX_VALUE),
+                    () -> FilterPredicate.gt("score", 100L)),
             new Dataset("yellow-tripdata-2025-01", "fare_amount", "trip_distance",
                     () -> FilterPredicate.gt("fare_amount", Double.MAX_VALUE),
-                    () -> FilterPredicate.gt("trip_distance", Double.MAX_VALUE)));
+                    () -> FilterPredicate.gt("trip_distance", Double.MAX_VALUE),
+                    () -> FilterPredicate.gt("fare_amount", 100.0)));
 
     private static final List<Shape> SHAPES = List.of(
             new Shape("filter_projected", true, false, false),
@@ -79,13 +87,21 @@ public final class FooterQuerySweep {
                     "Usage: FooterQuerySweep <data-dir> [dataset-name]");
         }
         Path data = Path.of(args[0]);
+        String mode = System.getProperty("footer.sweep.mode", "pruned");
+        boolean selective = switch (mode) {
+            case "pruned" -> false;
+            case "selective" -> true;
+            default -> throw new IllegalArgumentException("Unknown footer.sweep.mode: " + mode);
+        };
+        int warmups = selective ? SELECTIVE_WARMUPS : PRUNED_WARMUPS;
+        int runs = selective ? SELECTIVE_RUNS : PRUNED_RUNS;
+        List<Shape> shapes = selective ? List.of(SHAPES.get(1)) : SHAPES;
         String outputPath = System.getProperty("footer.sweep.output");
         PrintStream output = outputPath == null
                 ? System.out
                 : new PrintStream(outputPath, StandardCharsets.UTF_8);
-        output.println("dataset,columns,projection,projected,shape,filter_columns,"
-                + "filters_projected,jump_stat_columns,modular_stat_columns,footer,plan_ms,"
-                + "query_ms,records");
+        output.println("query_kind,dataset,columns,projection,projected,shape,filter_columns,"
+                + "filters_projected,footer,plan_ms,query_ms,records");
         int cell = 0;
         for (Dataset dataset : DATASETS) {
             if (args.length == 2 && !dataset.name().equals(args[1])) {
@@ -100,24 +116,22 @@ public final class FooterQuerySweep {
                     Math.max(1, (columns.size() + 1) / 2), columns.size()};
             String[] labels = {"1", "10pct", "50pct", "100pct"};
             for (int width = 0; width < widths.length; width++) {
-                for (Shape shape : SHAPES) {
+                for (Shape shape : shapes) {
                     String[] projection = projection(columns, widths[width], dataset, shape);
-                    FilterPredicate filter = predicate(dataset, shape);
-                    int filterColumns = shape.twoFilters() ? 2 : 1;
+                    FilterPredicate filter = predicate(dataset, shape, selective);
                     int projectedFilters = shape.projectFilter() ? 1 : 0;
-                    int jumpStatColumns = projection.length + filterColumns - projectedFilters;
                     String filterNames = dataset.filterColumn()
                             + (shape.twoFilters() ? "+" + dataset.secondFilterColumn() : "");
                     for (int footerIndex = 0; footerIndex < FOOTERS.size(); footerIndex++) {
                         String footer = FOOTERS.get((cell + footerIndex) % FOOTERS.size());
                         Result result = measure(path(data, dataset.name(), footer),
-                                projection, filter);
+                                projection, filter, warmups, runs, !selective);
                         output.printf(Locale.ROOT,
-                                "%s,%d,%s,%d,%s,%s,%d,%d,%d,%s,%.3f,%.3f,%d%n",
-                                dataset.name(), columns.size(), labels[width], projection.length,
-                                shape.name(), filterNames, projectedFilters, jumpStatColumns,
-                                filterColumns, footer, result.planMs(), result.queryMs(),
-                                result.records());
+                                "%s,%s,%d,%s,%d,%s,%s,%d,%s,%.3f,%.3f,%d%n",
+                                mode, dataset.name(), columns.size(), labels[width],
+                                projection.length, shape.name(), filterNames, projectedFilters,
+                                footer,
+                                result.planMs(), result.queryMs(), result.records());
                     }
                     cell++;
                 }
@@ -128,29 +142,29 @@ public final class FooterQuerySweep {
         }
     }
 
-    private static Result measure(Path path, String[] projection, FilterPredicate filter)
-            throws Exception {
-        for (int i = 0; i < WARMUPS; i++) {
+    private static Result measure(Path path, String[] projection, FilterPredicate filter,
+            int warmups, int runs, boolean expectNoRows) throws Exception {
+        for (int i = 0; i < warmups; i++) {
             run(path, projection, filter);
         }
         List<Double> plans = new ArrayList<>();
         List<Double> queries = new ArrayList<>();
         long expectedRecords = -1;
-        for (int i = 0; i < RUNS; i++) {
+        for (int i = 0; i < runs; i++) {
             Result result = run(path, projection, filter);
             plans.add(result.planMs());
             queries.add(result.queryMs());
             if (expectedRecords >= 0 && result.records() != expectedRecords) {
                 throw new AssertionError("Record count changed for " + path);
             }
-            if (result.records() != 0) {
+            if (expectNoRows && result.records() != 0) {
                 throw new AssertionError("Expected statistics to prune every row in " + path);
             }
             expectedRecords = result.records();
         }
         Collections.sort(plans);
         Collections.sort(queries);
-        return new Result(plans.get(RUNS / 2), queries.get(RUNS / 2), expectedRecords);
+        return new Result(plans.get(runs / 2), queries.get(runs / 2), expectedRecords);
     }
 
     private static Result run(Path path, String[] projection, FilterPredicate filter)
@@ -196,10 +210,14 @@ public final class FooterQuerySweep {
         return selected.toArray(String[]::new);
     }
 
-    private static FilterPredicate predicate(Dataset dataset, Shape shape) {
+    private static FilterPredicate predicate(Dataset dataset, Shape shape, boolean selective) {
+        if (selective) {
+            return dataset.selectiveFilter().get();
+        }
         return shape.twoFilters()
-                ? FilterPredicate.or(dataset.filter().get(), dataset.secondFilter().get())
-                : dataset.filter().get();
+                ? FilterPredicate.or(
+                        dataset.pruningFilter().get(), dataset.secondPruningFilter().get())
+                : dataset.pruningFilter().get();
     }
 
     private static ParquetFileReader open(Path path) throws Exception {
