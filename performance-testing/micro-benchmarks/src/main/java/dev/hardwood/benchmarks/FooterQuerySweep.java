@@ -56,22 +56,22 @@ public final class FooterQuerySweep {
     }
 
     private static final List<Dataset> DATASETS = List.of(
-            new Dataset("us-accidents-00004-of-00007", "Severity", "Start_Lat",
-                    () -> FilterPredicate.gt("Severity", Long.MAX_VALUE),
+            new Dataset("us-accidents-00004-of-00007", "Start_Lat", "Start_Lng",
                     () -> FilterPredicate.gt("Start_Lat", Double.MAX_VALUE),
-                    () -> FilterPredicate.gt("Severity", 3L)),
+                    () -> FilterPredicate.gt("Start_Lng", Double.MAX_VALUE),
+                    () -> FilterPredicate.eq("Start_Lat", 49.00049329)),
             new Dataset("fineweb-10bt-000", "token_count", "language_score",
                     () -> FilterPredicate.gt("token_count", Long.MAX_VALUE),
                     () -> FilterPredicate.gt("language_score", Double.MAX_VALUE),
-                    () -> FilterPredicate.gt("token_count", 5_000L)),
-            new Dataset("hacker-news-00000-of-00039", "score", "id",
-                    () -> FilterPredicate.gt("score", Long.MAX_VALUE),
+                    () -> FilterPredicate.eq("token_count", 130_040L)),
+            new Dataset("hacker-news-00000-of-00039", "id", "score",
                     () -> FilterPredicate.gt("id", Long.MAX_VALUE),
-                    () -> FilterPredicate.gt("score", 100L)),
+                    () -> FilterPredicate.gt("score", Long.MAX_VALUE),
+                    () -> FilterPredicate.eq("id", 1_072_138L)),
             new Dataset("yellow-tripdata-2025-01", "fare_amount", "trip_distance",
                     () -> FilterPredicate.gt("fare_amount", Double.MAX_VALUE),
                     () -> FilterPredicate.gt("trip_distance", Double.MAX_VALUE),
-                    () -> FilterPredicate.gt("fare_amount", 100.0)));
+                    () -> FilterPredicate.eq("fare_amount", 863_372.12)));
 
     private static final List<Shape> SHAPES = List.of(
             new Shape("filter_projected", true, false, false),

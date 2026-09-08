@@ -62,9 +62,10 @@ projected metadata; modular metadata keeps projected placement separate from fil
 
 ### Selective query sweep
 
-This second graph uses real predicates that leave matching row groups. Hardwood reads their data
-pages, applies the residual filter, and consumes every result. It shows where the footer advantage
-remains visible and where wider data decoding starts to dominate the query.
+This second graph uses equality predicates at a column's global maximum. Each query returns one
+real row and scans one surviving row group. A cell is shown only when OSS spends at least 40% of
+its end-to-end query time opening and planning; non-qualifying datasets remain as labeled negative
+controls.
 
 ![Selective footer query sweep](results/selective-footer-query-sweep.svg)
 

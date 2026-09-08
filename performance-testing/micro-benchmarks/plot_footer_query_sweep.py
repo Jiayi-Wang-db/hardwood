@@ -28,6 +28,10 @@ def main():
     rows = list(csv.DictReader(args.csv.open()))
     selected = [row for row in rows
                 if row["query_kind"] == args.kind and row["shape"] == "filter_unprojected"]
+    footer_shares = oss_footer_shares(selected)
+    if args.kind == "selective":
+        selected = [row for row in selected
+                    if footer_shares[(row["dataset"], row["projection"])] >= 0.4]
     grouped = defaultdict(list)
     for row in selected:
         grouped[row["dataset"]].append(row)
@@ -58,7 +62,9 @@ def main():
         parts.append(f'<text class="axis" x="{x + 19}" y="42">{LABELS[footer]}</text>')
 
     for panel, dataset in enumerate(DATASET_LABELS):
-        render_panel(parts, panel, dataset, grouped[dataset])
+        dataset_shares = [share for (name, _), share in footer_shares.items()
+                          if name == dataset]
+        render_panel(parts, panel, dataset, grouped[dataset], dataset_shares, args.kind)
 
     parts.append('<text class="axis" x="600" y="778" text-anchor="middle">'
                  'Projected output columns (filter column is additional and not returned)</text>')
@@ -74,17 +80,35 @@ def title(kind):
 
 def subtitle(kind):
     if kind == "selective":
-        return ("One unprojected filter column; statistics prune most row groups and the "
-                "survivors are scanned to completion.")
+        return ("One unprojected filter column; only cells with at least 40% of OSS query time "
+                "spent opening and planning are shown.")
     return ("One unprojected filter column; all row groups are eliminated by statistics, "
             "so no data pages are read.")
 
 
-def render_panel(parts, panel, dataset, rows):
+def oss_footer_shares(rows):
+    return {(row["dataset"], row["projection"]):
+            float(row["plan_ms"]) / float(row["query_ms"])
+            for row in rows if row["footer"] == "oss"}
+
+
+def render_panel(parts, panel, dataset, rows, shares, kind):
     left = 55 + (panel % 2) * 580
     top = 105 + (panel // 2) * 325
     chart_left, chart_top = left + 52, top + 64
     chart_width, chart_height = 470, 205
+    parts.append(f'<rect x="{left}" y="{top}" width="550" height="300" rx="12" '
+                 'fill="#f8fafc" stroke="#e2e8f0"/>')
+    parts.append(f'<text class="panel-title" x="{left + 20}" y="{top + 28}">'
+                 f'{html.escape(DATASET_LABELS[dataset])}</text>')
+    if not rows:
+        best = max(shares) * 100
+        parts.append(f'<text class="subtitle" x="{left + 20}" y="{top + 49}">'
+                     f'No qualifying projection (best OSS footer share: {best:.1f}%)</text>')
+        parts.append(f'<text class="axis" x="{left + 275}" y="{top + 165}" '
+                     'text-anchor="middle">Data scanning dominates this dataset.</text>')
+        return
+
     by_projection = defaultdict(dict)
     projection_order = []
     for row in rows:
@@ -95,12 +119,12 @@ def render_panel(parts, panel, dataset, rows):
     maximum = max(float(row["query_ms"]) for row in rows) * 1.18
     filter_name = rows[0]["filter_columns"] if rows else ""
 
-    parts.append(f'<rect x="{left}" y="{top}" width="550" height="300" rx="12" '
-                 'fill="#f8fafc" stroke="#e2e8f0"/>')
-    parts.append(f'<text class="panel-title" x="{left + 20}" y="{top + 28}">'
-                 f'{html.escape(DATASET_LABELS[dataset])}</text>')
-    parts.append(f'<text class="subtitle" x="{left + 20}" y="{top + 49}">'
-                 f'Filter column: {html.escape(filter_name)} (not projected)</text>')
+    if kind == "selective":
+        detail = (f'Filter column: {html.escape(filter_name)} (not projected), '
+                  f'OSS footer share: {min(shares) * 100:.1f}-{max(shares) * 100:.1f}%')
+    else:
+        detail = f'Filter column: {html.escape(filter_name)} (not projected)'
+    parts.append(f'<text class="subtitle" x="{left + 20}" y="{top + 49}">{detail}</text>')
 
     for tick in range(5):
         value = maximum * tick / 4
