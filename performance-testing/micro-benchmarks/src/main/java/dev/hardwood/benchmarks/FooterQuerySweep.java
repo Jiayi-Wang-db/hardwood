@@ -76,7 +76,8 @@ public final class FooterQuerySweep {
                     "Usage: FooterQuerySweep <data-dir> [dataset-name]");
         }
         Path data = Path.of(args[0]);
-        System.out.println("dataset,columns,projection,projected,shape,footer,plan_ms,"
+        System.out.println("dataset,columns,projection,projected,shape,filter_columns,"
+                + "filters_projected,jump_stat_columns,modular_stat_columns,footer,plan_ms,"
                 + "query_ms,records");
         int cell = 0;
         for (Dataset dataset : DATASETS) {
@@ -99,14 +100,20 @@ public final class FooterQuerySweep {
                     }
                     String[] projection = projection(columns, widths[width], dataset, shape);
                     FilterPredicate filter = predicate(dataset, shape);
+                    int filterColumns = shape.twoFilters() ? 2 : 1;
+                    int projectedFilters = shape.projectFilter() ? 1 : 0;
+                    int jumpStatColumns = projection.length + filterColumns - projectedFilters;
+                    String filterNames = dataset.filterColumn()
+                            + (shape.twoFilters() ? "+" + dataset.secondFilterColumn() : "");
                     for (int footerIndex = 0; footerIndex < FOOTERS.size(); footerIndex++) {
                         String footer = FOOTERS.get((cell + footerIndex) % FOOTERS.size());
                         Result result = measure(path(data, dataset.name(), footer),
                                 projection, filter);
                         System.out.printf(Locale.ROOT,
-                                "%s,%d,%s,%d,%s,%s,%.3f,%.3f,%d%n",
+                                "%s,%d,%s,%d,%s,%s,%d,%d,%d,%s,%.3f,%.3f,%d%n",
                                 dataset.name(), columns.size(), labels[width], projection.length,
-                                shape.name(), footer, result.planMs(), result.queryMs(),
+                                shape.name(), filterNames, projectedFilters, jumpStatColumns,
+                                filterColumns, footer, result.planMs(), result.queryMs(),
                                 result.records());
                     }
                     cell++;
