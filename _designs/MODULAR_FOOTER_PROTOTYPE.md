@@ -36,3 +36,13 @@ so truncated bounds remain safe for predicate pruning.
 
 This is an experimental compatibility path for benchmarking the modular representation. It adds
 no public API and does not change standard Parquet behavior.
+
+## Jump-table footer
+
+The benchmark's jump-table representation remains a standard `PAR1` footer. A versioned pointer
+in the first `FileMetaData` field locates an appended index containing top-level field offsets and
+one byte offset per column chunk. Hardwood detects that pointer, reads schema and row counts from
+their indexed locations, and exposes row groups and column chunks as lazy lists. Accessing a
+projected or filter column decodes its original standard `ColumnChunk` bytes directly; metadata
+for other columns is never walked or materialized. Files without the pointer continue through the
+ordinary standard-footer reader.

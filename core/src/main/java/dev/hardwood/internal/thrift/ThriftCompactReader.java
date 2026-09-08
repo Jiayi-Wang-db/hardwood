@@ -717,6 +717,12 @@ public class ThriftCompactReader {
         lastFieldId = savedFieldId;
     }
 
+    /// Sets the preceding field id when decoding begins at an indexed field in the middle of a
+    /// struct. Jump-table footer offsets use this to preserve Compact Protocol delta field ids.
+    void setFieldIdContext(short fieldId) {
+        lastFieldId = fieldId;
+    }
+
     /// Decodes one element of a `list<struct>` from the reader it is given, which is positioned
     /// on the element's first field header.
     @FunctionalInterface

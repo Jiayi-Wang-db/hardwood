@@ -18,6 +18,7 @@ import dev.hardwood.internal.EncryptedFileException;
 import dev.hardwood.internal.ExceptionContext;
 import dev.hardwood.internal.FetchReason;
 import dev.hardwood.internal.thrift.FileMetaDataReader;
+import dev.hardwood.internal.thrift.JumpTableFileMetadataReader;
 import dev.hardwood.internal.thrift.ModularFileMetadataReader;
 import dev.hardwood.internal.thrift.ThriftCompactReader;
 import dev.hardwood.metadata.FileMetaData;
@@ -133,6 +134,10 @@ public final class ParquetMetadataReader {
         ByteBuffer footerBuffer;
         try (FetchReason.Scope ignored = FetchReason.set("footer-body")) {
             footerBuffer = inputFile.readRange(footerStart, footerLength);
+        }
+        FileMetaData indexed = JumpTableFileMetadataReader.tryRead(footerBuffer, footerStart);
+        if (indexed != null) {
+            return indexed;
         }
         ThriftCompactReader reader = new ThriftCompactReader(footerBuffer);
         try {
