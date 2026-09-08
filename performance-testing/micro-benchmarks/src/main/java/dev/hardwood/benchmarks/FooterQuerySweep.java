@@ -7,6 +7,8 @@
  */
 package dev.hardwood.benchmarks;
 
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,7 +32,8 @@ import dev.hardwood.schema.ColumnProjection;
 ///
 /// Prepare an OSS, jump-table, and full modular file for every corpus entry, then run:
 /// ```shell
-/// java -cp target/benchmarks.jar dev.hardwood.benchmarks.FooterQuerySweep /path/to/data
+/// java -Dfooter.sweep.output=results.csv -cp target/benchmarks.jar \
+///   dev.hardwood.benchmarks.FooterQuerySweep /path/to/data
 /// ```
 public final class FooterQuerySweep {
     private static final int WARMUPS = 3;
@@ -76,7 +79,11 @@ public final class FooterQuerySweep {
                     "Usage: FooterQuerySweep <data-dir> [dataset-name]");
         }
         Path data = Path.of(args[0]);
-        System.out.println("dataset,columns,projection,projected,shape,filter_columns,"
+        String outputPath = System.getProperty("footer.sweep.output");
+        PrintStream output = outputPath == null
+                ? System.out
+                : new PrintStream(outputPath, StandardCharsets.UTF_8);
+        output.println("dataset,columns,projection,projected,shape,filter_columns,"
                 + "filters_projected,jump_stat_columns,modular_stat_columns,footer,plan_ms,"
                 + "query_ms,records");
         int cell = 0;
@@ -94,10 +101,6 @@ public final class FooterQuerySweep {
             String[] labels = {"1", "10pct", "50pct", "100pct"};
             for (int width = 0; width < widths.length; width++) {
                 for (Shape shape : SHAPES) {
-                    if (shape.excludeFilter() && widths[width] > columns.size()
-                            - (shape.twoFilters() ? 2 : 1)) {
-                        continue;
-                    }
                     String[] projection = projection(columns, widths[width], dataset, shape);
                     FilterPredicate filter = predicate(dataset, shape);
                     int filterColumns = shape.twoFilters() ? 2 : 1;
@@ -109,7 +112,7 @@ public final class FooterQuerySweep {
                         String footer = FOOTERS.get((cell + footerIndex) % FOOTERS.size());
                         Result result = measure(path(data, dataset.name(), footer),
                                 projection, filter);
-                        System.out.printf(Locale.ROOT,
+                        output.printf(Locale.ROOT,
                                 "%s,%d,%s,%d,%s,%s,%d,%d,%d,%s,%.3f,%.3f,%d%n",
                                 dataset.name(), columns.size(), labels[width], projection.length,
                                 shape.name(), filterNames, projectedFilters, jumpStatColumns,
@@ -119,6 +122,9 @@ public final class FooterQuerySweep {
                     cell++;
                 }
             }
+        }
+        if (output != System.out) {
+            output.close();
         }
     }
 

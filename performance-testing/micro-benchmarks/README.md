@@ -51,6 +51,22 @@ allocation profiling, `-rf json -rff out.json` for machine-readable results,
 | `wide/WideSchemaMetadataBenchmark` | Footer decode, schema build and `open()` for 10 … 100,000 `FLOAT64` columns (#919) | self-generating (`WideSchemaFileGenerator`) |
 | `wide/WideSchemaMetadataParquetJavaBenchmark` | The same three steps through parquet-java, over the same fixtures | self-generating (`WideSchemaFileGenerator`) |
 
+### Footer query sweep
+
+The graph below shows complete queries with one unprojected filter column. Statistics eliminate
+every row group, so the timing reflects footer open, projection preparation, statistics decoding,
+and row-group filtering without data-page I/O. Jump-table metadata decodes statistics for the
+`N` projected columns plus the filter; modular metadata decodes statistics only for the filter.
+
+![Footer query sweep](results/footer-query-sweep.svg)
+
+Regenerate the graph from the CSV output:
+
+```shell
+python3 plot_footer_query_sweep.py results/footer-query-sweep.csv \
+  results/footer-query-sweep.svg
+```
+
 Python generator scripts live in the parent `performance-testing/` directory and
 default their output to `performance-testing/test-data-setup/target/benchmark-data`;
 pass that directory as `-p dataDir=...`. Fixture generation is idempotent —
