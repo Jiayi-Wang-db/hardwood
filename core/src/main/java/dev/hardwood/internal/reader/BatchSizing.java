@@ -10,8 +10,6 @@ package dev.hardwood.internal.reader;
 import java.util.List;
 
 import dev.hardwood.internal.schema.ProjectedSchema;
-import dev.hardwood.metadata.ColumnChunk;
-import dev.hardwood.metadata.FieldPath;
 import dev.hardwood.metadata.RowGroup;
 import dev.hardwood.schema.ColumnSchema;
 
@@ -94,15 +92,14 @@ public final class BatchSizing {
         int columnCount = projectedSchema.getProjectedColumnCount();
         double[] valuesPerRow = new double[columnCount];
         for (int i = 0; i < columnCount; i++) {
-            FieldPath path = projectedSchema.getProjectedColumn(i).fieldPath();
+            int originalIndex = projectedSchema.toOriginalIndex(i);
             long values = 0;
             for (RowGroup rowGroup : rowGroups) {
-                for (ColumnChunk chunk : rowGroup.columns()) {
-                    if (chunk.metaData().pathInSchema().equals(path)) {
-                        values += chunk.metaData().numValues();
-                        break;
-                    }
+                if (originalIndex >= rowGroup.columns().size()) {
+                    throw new IllegalArgumentException(
+                            "Row group has fewer columns than the file schema");
                 }
+                values += rowGroup.columns().get(originalIndex).metaData().numValues();
             }
             valuesPerRow[i] = (double) values / totalRows;
         }
