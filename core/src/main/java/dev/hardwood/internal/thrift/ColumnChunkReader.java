@@ -10,21 +10,26 @@ package dev.hardwood.internal.thrift;
 import dev.hardwood.internal.thrift.ThriftCompactConstants.FieldType.Codes;
 import dev.hardwood.metadata.ColumnChunk;
 import dev.hardwood.metadata.ColumnMetaData;
+import dev.hardwood.metadata.FieldPath;
 
 /// Reader for ColumnChunk from Thrift Compact Protocol.
 public class ColumnChunkReader {
 
     public static ColumnChunk read(ThriftCompactReader reader) {
+        return read(reader, null);
+    }
+
+    static ColumnChunk read(ThriftCompactReader reader, FieldPath indexedPath) {
         short saved = reader.pushFieldIdContext();
         try {
-            return readInternal(reader);
+            return readInternal(reader, indexedPath);
         }
         finally {
             reader.popFieldIdContext(saved);
         }
     }
 
-    private static ColumnChunk readInternal(ThriftCompactReader reader) {
+    private static ColumnChunk readInternal(ThriftCompactReader reader, FieldPath indexedPath) {
         ColumnMetaData metaData = null;
         Long offsetIndexOffset = null;
         Integer offsetIndexLength = null;
@@ -50,7 +55,7 @@ public class ColumnChunkReader {
                     break;
                 case 3: // meta_data (required)
                     if (reader.acceptField(header, Codes.STRUCT)) {
-                        metaData = ColumnMetaDataReader.read(reader);
+                        metaData = ColumnMetaDataReader.read(reader, indexedPath);
                     }
                     break;
                 case 4: // offset_index_offset (optional i64)

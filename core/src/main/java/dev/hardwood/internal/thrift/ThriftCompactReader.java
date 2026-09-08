@@ -88,6 +88,12 @@ public class ThriftCompactReader {
         this.startPosition = 0;
     }
 
+    /// Creates a reader bounded to one indexed metadata value.
+    public ThriftCompactReader(ByteBuffer buffer, int offset, int length) {
+        this.buffer = buffer.slice(offset, length).order(ByteOrder.LITTLE_ENDIAN);
+        this.startPosition = 0;
+    }
+
     /// Returns the number of bytes read from the buffer.
     public int getBytesRead() {
         return buffer.position() - startPosition;

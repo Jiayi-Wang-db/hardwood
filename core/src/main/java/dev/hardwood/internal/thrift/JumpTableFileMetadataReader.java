@@ -21,9 +21,11 @@ import dev.hardwood.internal.thrift.ThriftCompactConstants.FieldType.Codes;
 import dev.hardwood.metadata.ColumnChunk;
 import dev.hardwood.metadata.ColumnOrder;
 import dev.hardwood.metadata.FileMetaData;
+import dev.hardwood.metadata.FieldPath;
 import dev.hardwood.metadata.RowGroup;
 import dev.hardwood.metadata.SchemaElement;
 import dev.hardwood.reader.ParquetReadException;
+import dev.hardwood.schema.FileSchema;
 
 /// Reads the indexed Parquet footer emitted by the footer benchmark.
 ///
@@ -70,8 +72,11 @@ public final class JumpTableFileMetadataReader {
         List<ColumnOrder> columnOrders = index.fields.containsKey(7)
                 ? readColumnOrders(footer, index.fields.get(7))
                 : List.of();
+        List<FieldPath> paths = FileSchema.fromSchemaElements(schema).getColumns().stream()
+                .map(column -> column.fieldPath())
+                .toList();
         List<RowGroup> rowGroups = new IndexedRowGroups(
-                footer, index, totalByteSizes, rowCounts);
+                footer, index, totalByteSizes, rowCounts, paths);
         return new FileMetaData(version, schema, numRows, rowGroups, keyValues, createdBy,
                 columnOrders);
     }
@@ -143,7 +148,16 @@ public final class JumpTableFileMetadataReader {
         if (width > Long.BYTES) {
             throw malformed("column_chunk_offsets entries are wider than i64");
         }
-        return new Index(columns, rowGroups, chunkOffsets, width, fields);
+        long[] decodedOffsets = new long[entries];
+        for (int entry = 0; entry < entries; entry++) {
+            int start = Math.multiplyExact(entry, width);
+            long value = 0;
+            for (int i = 0; i < width; i++) {
+                value |= (chunkOffsets[start + i] & 0xFFL) << (i * 8);
+            }
+            decodedOffsets[entry] = value;
+        }
+        return new Index(columns, rowGroups, decodedOffsets, fields);
     }
 
     private static Map<Integer, Long> readFieldOffsets(ThriftCompactReader reader) {
@@ -280,14 +294,16 @@ public final class JumpTableFileMetadataReader {
         private final Index index;
         private final long[] totalByteSizes;
         private final long[] rowCounts;
+        private final List<FieldPath> paths;
         private final RowGroup[] cache;
 
         private IndexedRowGroups(ByteBuffer footer, Index index, long[] totalByteSizes,
-                long[] rowCounts) {
+                long[] rowCounts, List<FieldPath> paths) {
             this.footer = footer;
             this.index = index;
             this.totalByteSizes = totalByteSizes;
             this.rowCounts = rowCounts;
+            this.paths = paths;
             this.cache = new RowGroup[index.rowGroups];
         }
 
@@ -298,7 +314,7 @@ public final class JumpTableFileMetadataReader {
             if (existing != null) {
                 return existing;
             }
-            RowGroup created = new RowGroup(new IndexedColumns(footer, index, rowGroup),
+            RowGroup created = new RowGroup(new IndexedColumns(footer, index, rowGroup, paths),
                     totalByteSizes[rowGroup], rowCounts[rowGroup]);
             cache[rowGroup] = created;
             return created;
@@ -314,12 +330,15 @@ public final class JumpTableFileMetadataReader {
         private final ByteBuffer footer;
         private final Index index;
         private final int rowGroup;
+        private final List<FieldPath> paths;
         private final ColumnChunk[] cache;
 
-        private IndexedColumns(ByteBuffer footer, Index index, int rowGroup) {
+        private IndexedColumns(ByteBuffer footer, Index index, int rowGroup,
+                List<FieldPath> paths) {
             this.footer = footer;
             this.index = index;
             this.rowGroup = rowGroup;
+            this.paths = paths;
             this.cache = new ColumnChunk[index.columns];
         }
 
@@ -336,7 +355,8 @@ public final class JumpTableFileMetadataReader {
                 throw malformed("column chunk offsets are not increasing");
             }
             ColumnChunk created = ColumnChunkReader.read(
-                    new ThriftCompactReader(slice(footer, from, to - from)));
+                    new ThriftCompactReader(footer, Math.toIntExact(from),
+                            Math.toIntExact(to - from)), paths.get(column));
             cache[column] = created;
             return created;
         }
@@ -350,16 +370,11 @@ public final class JumpTableFileMetadataReader {
     private record Pointer(long indexStart, long indexLength, long fileMetadataLength) {
     }
 
-    private record Index(int columns, int rowGroups, byte[] offsets, int width,
+    private record Index(int columns, int rowGroups, long[] offsets,
                          Map<Integer, Long> fields) {
         private long chunkOffset(int rowGroup, int column) {
             int entry = Math.addExact(Math.multiplyExact(rowGroup, columns + 1), column);
-            int start = Math.multiplyExact(entry, width);
-            long value = 0;
-            for (int i = 0; i < width; i++) {
-                value |= (offsets[start + i] & 0xFFL) << (i * 8);
-            }
-            return value;
+            return offsets[entry];
         }
     }
 }
