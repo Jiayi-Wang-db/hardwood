@@ -18,6 +18,7 @@ import dev.hardwood.internal.EncryptedFileException;
 import dev.hardwood.internal.ExceptionContext;
 import dev.hardwood.internal.FetchReason;
 import dev.hardwood.internal.thrift.FileMetaDataReader;
+import dev.hardwood.internal.thrift.ModularFileMetadataReader;
 import dev.hardwood.internal.thrift.ThriftCompactReader;
 import dev.hardwood.metadata.FileMetaData;
 import dev.hardwood.reader.ParquetReadException;
@@ -32,8 +33,10 @@ public final class ParquetMetadataReader {
     /// Magic written in place of [#MAGIC] when the footer itself is encrypted
     /// (Parquet Modular Encryption, encrypted-footer mode).
     private static final byte[] ENCRYPTED_MAGIC = "PARE".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] MODULAR_MAGIC = "MFP1".getBytes(StandardCharsets.UTF_8);
     private static final int FOOTER_LENGTH_SIZE = 4;
     private static final int MAGIC_SIZE = 4;
+    private static final int MODULAR_TRAILER_SIZE = 20;
 
     /// Named once because two places raise it: the magic-byte check here, and the
     /// `encryption_algorithm` field a plaintext footer carries.
@@ -70,6 +73,35 @@ public final class ParquetMetadataReader {
         if (!Arrays.equals(startMagic, MAGIC)) {
             throw new ParquetReadException(ExceptionContext.filePrefix(inputFile.name())
                     + "Not a Parquet file (invalid magic number at start)");
+        }
+
+        if (fileSize >= MAGIC_SIZE + MODULAR_TRAILER_SIZE) {
+            ByteBuffer modularTrailer;
+            try (FetchReason.Scope ignored = FetchReason.set("modular-footer-info")) {
+                modularTrailer = inputFile.readRange(
+                        fileSize - MODULAR_TRAILER_SIZE, MODULAR_TRAILER_SIZE);
+            }
+            modularTrailer.order(ByteOrder.LITTLE_ENDIAN);
+            long modularStart = modularTrailer.getLong();
+            long rootOffset = modularTrailer.getLong();
+            byte[] modularMagic = new byte[MAGIC_SIZE];
+            modularTrailer.get(modularMagic);
+            if (Arrays.equals(modularMagic, MODULAR_MAGIC)) {
+                long metadataEnd = fileSize - MODULAR_TRAILER_SIZE;
+                if (modularStart < MAGIC_SIZE || modularStart > metadataEnd
+                        || rootOffset < 0 || rootOffset > metadataEnd - modularStart) {
+                    throw new ParquetReadException(ExceptionContext.filePrefix(inputFile.name())
+                            + "Invalid modular footer offsets");
+                }
+                try {
+                    return ModularFileMetadataReader.read(
+                            inputFile, modularStart, rootOffset, metadataEnd);
+                }
+                catch (ParquetReadException e) {
+                    throw new ParquetReadException(
+                            ExceptionContext.filePrefix(inputFile.name()) + e.getMessage(), e);
+                }
+            }
         }
 
         // Read footer size and magic number at end
