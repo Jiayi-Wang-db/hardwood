@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="790" viewBox="0 0 1200 790">
+<style>
+text { font-family: Inter, ui-sans-serif, system-ui, sans-serif; fill: #172033; }
+.title { font-size: 25px; font-weight: 700; }
+.subtitle { font-size: 14px; fill: #64748b; }
+.panel-title { font-size: 17px; font-weight: 650; }
+.axis { font-size: 12px; fill: #64748b; }
+.value { font-size: 11px; font-weight: 600; }
+.grid { stroke: #e2e8f0; stroke-width: 1; }
+</style>
+<rect width="1200" height="790" fill="#ffffff" rx="12"/>
+<text class="title" x="54" y="43">Full queries dominated by footer work</text>
+<text class="subtitle" x="54" y="68">One unprojected filter column; all row groups are eliminated by statistics, so no data pages are read.</text>
+<rect x="760" y="31" width="13" height="13" rx="3" fill="#94a3b8"/>
+<text class="axis" x="779" y="42">OSS</text>
+<rect x="895" y="31" width="13" height="13" rx="3" fill="#f59e0b"/>
+<text class="axis" x="914" y="42">Jump table</text>
+<rect x="1030" y="31" width="13" height="13" rx="3" fill="#2563eb"/>
+<text class="axis" x="1049" y="42">Modular</text>
+<rect x="55" y="105" width="550" height="300" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+<text class="panel-title" x="75" y="133">US Accidents</text>
+<text class="subtitle" x="75" y="154">Filter column: Start_Lat (not projected)</text>
+<line class="grid" x1="107" y1="374.0" x2="577" y2="374.0"/>
+<text class="axis" x="99" y="378.0" text-anchor="end">0.0</text>
+<line class="grid" x1="107" y1="322.8" x2="577" y2="322.8"/>
+<text class="axis" x="99" y="326.8" text-anchor="end">9.1</text>
+<line class="grid" x1="107" y1="271.5" x2="577" y2="271.5"/>
+<text class="axis" x="99" y="275.5" text-anchor="end">18.2</text>
+<line class="grid" x1="107" y1="220.2" x2="577" y2="220.2"/>
+<text class="axis" x="99" y="224.2" text-anchor="end">27.4</text>
+<line class="grid" x1="107" y1="169.0" x2="577" y2="169.0"/>
+<text class="axis" x="99" y="173.0" text-anchor="end">36.5</text>
+<text class="axis" x="165.8" y="393" text-anchor="middle">1 (1)</text>
+<rect x="124.2" y="200.3" width="25" height="173.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="136.8" y="195.3" text-anchor="middle">30.90</text>
+<rect x="153.2" y="356.2" width="25" height="17.8" rx="3" fill="#f59e0b"/>
+<text class="value" x="165.8" y="351.2" text-anchor="middle">3.17</text>
+<rect x="182.2" y="358.0" width="25" height="16.0" rx="3" fill="#2563eb"/>
+<text class="value" x="194.8" y="353.0" text-anchor="middle">2.85</text>
+<text class="axis" x="283.2" y="393" text-anchor="middle">10% (5)</text>
+<rect x="241.8" y="203.1" width="25" height="170.9" rx="3" fill="#94a3b8"/>
+<text class="value" x="254.2" y="198.1" text-anchor="middle">30.40</text>
+<rect x="270.8" y="364.4" width="25" height="9.6" rx="3" fill="#f59e0b"/>
+<text class="value" x="283.2" y="359.4" text-anchor="middle">1.70</text>
+<rect x="299.8" y="367.0" width="25" height="7.0" rx="3" fill="#2563eb"/>
+<text class="value" x="312.2" y="362.0" text-anchor="middle">1.25</text>
+<text class="axis" x="400.8" y="393" text-anchor="middle">50% (23)</text>
+<rect x="359.2" y="215.3" width="25" height="158.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="371.8" y="210.3" text-anchor="middle">28.23</text>
+<rect x="388.2" y="363.8" width="25" height="10.2" rx="3" fill="#f59e0b"/>
+<text class="value" x="400.8" y="358.8" text-anchor="middle">1.82</text>
+<rect x="417.2" y="364.7" width="25" height="9.3" rx="3" fill="#2563eb"/>
+<text class="value" x="429.8" y="359.7" text-anchor="middle">1.66</text>
+<text class="axis" x="518.2" y="393" text-anchor="middle">max (45)</text>
+<rect x="476.8" y="253.0" width="25" height="121.0" rx="3" fill="#94a3b8"/>
+<text class="value" x="489.2" y="248.0" text-anchor="middle">21.52</text>
+<rect x="505.8" y="365.8" width="25" height="8.2" rx="3" fill="#f59e0b"/>
+<text class="value" x="518.2" y="360.8" text-anchor="middle">1.46</text>
+<rect x="534.8" y="367.7" width="25" height="6.3" rx="3" fill="#2563eb"/>
+<text class="value" x="547.2" y="362.7" text-anchor="middle">1.12</text>
+<text class="axis" transform="translate(69,271.5) rotate(-90)" text-anchor="middle">Full query (ms)</text>
+<rect x="635" y="105" width="550" height="300" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+<text class="panel-title" x="655" y="133">FineWeb 10BT</text>
+<text class="subtitle" x="655" y="154">Filter column: token_count (not projected)</text>
+<line class="grid" x1="687" y1="374.0" x2="1157" y2="374.0"/>
+<text class="axis" x="679" y="378.0" text-anchor="end">0.0</text>
+<line class="grid" x1="687" y1="322.8" x2="1157" y2="322.8"/>
+<text class="axis" x="679" y="326.8" text-anchor="end">2.1</text>
+<line class="grid" x1="687" y1="271.5" x2="1157" y2="271.5"/>
+<text class="axis" x="679" y="275.5" text-anchor="end">4.1</text>
+<line class="grid" x1="687" y1="220.2" x2="1157" y2="220.2"/>
+<text class="axis" x="679" y="224.2" text-anchor="end">6.2</text>
+<line class="grid" x1="687" y1="169.0" x2="1157" y2="169.0"/>
+<text class="axis" x="679" y="173.0" text-anchor="end">8.3</text>
+<text class="axis" x="745.8" y="393" text-anchor="middle">1 (1)</text>
+<rect x="704.2" y="250.1" width="25" height="123.9" rx="3" fill="#94a3b8"/>
+<text class="value" x="716.8" y="245.1" text-anchor="middle">5.00</text>
+<rect x="733.2" y="348.6" width="25" height="25.4" rx="3" fill="#f59e0b"/>
+<text class="value" x="745.8" y="343.6" text-anchor="middle">1.03</text>
+<rect x="762.2" y="358.3" width="25" height="15.7" rx="3" fill="#2563eb"/>
+<text class="value" x="774.8" y="353.3" text-anchor="middle">0.64</text>
+<text class="axis" x="863.2" y="393" text-anchor="middle">10% (1)</text>
+<rect x="821.8" y="200.3" width="25" height="173.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="834.2" y="195.3" text-anchor="middle">7.02</text>
+<rect x="850.8" y="349.2" width="25" height="24.8" rx="3" fill="#f59e0b"/>
+<text class="value" x="863.2" y="344.2" text-anchor="middle">1.00</text>
+<rect x="879.8" y="358.4" width="25" height="15.6" rx="3" fill="#2563eb"/>
+<text class="value" x="892.2" y="353.4" text-anchor="middle">0.63</text>
+<text class="axis" x="980.8" y="393" text-anchor="middle">50% (5)</text>
+<rect x="939.2" y="250.3" width="25" height="123.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="951.8" y="245.3" text-anchor="middle">5.00</text>
+<rect x="968.2" y="348.7" width="25" height="25.3" rx="3" fill="#f59e0b"/>
+<text class="value" x="980.8" y="343.7" text-anchor="middle">1.02</text>
+<rect x="997.2" y="358.6" width="25" height="15.4" rx="3" fill="#2563eb"/>
+<text class="value" x="1009.8" y="353.6" text-anchor="middle">0.62</text>
+<text class="axis" x="1098.2" y="393" text-anchor="middle">max (8)</text>
+<rect x="1056.8" y="251.2" width="25" height="122.8" rx="3" fill="#94a3b8"/>
+<text class="value" x="1069.2" y="246.2" text-anchor="middle">4.96</text>
+<rect x="1085.8" y="348.7" width="25" height="25.3" rx="3" fill="#f59e0b"/>
+<text class="value" x="1098.2" y="343.7" text-anchor="middle">1.02</text>
+<rect x="1114.8" y="358.5" width="25" height="15.5" rx="3" fill="#2563eb"/>
+<text class="value" x="1127.2" y="353.5" text-anchor="middle">0.63</text>
+<text class="axis" transform="translate(649,271.5) rotate(-90)" text-anchor="middle">Full query (ms)</text>
+<rect x="55" y="430" width="550" height="300" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+<text class="panel-title" x="75" y="458">Hacker News</text>
+<text class="subtitle" x="75" y="479">Filter column: id (not projected)</text>
+<line class="grid" x1="107" y1="699.0" x2="577" y2="699.0"/>
+<text class="axis" x="99" y="703.0" text-anchor="end">0.0</text>
+<line class="grid" x1="107" y1="647.8" x2="577" y2="647.8"/>
+<text class="axis" x="99" y="651.8" text-anchor="end">2.2</text>
+<line class="grid" x1="107" y1="596.5" x2="577" y2="596.5"/>
+<text class="axis" x="99" y="600.5" text-anchor="end">4.4</text>
+<line class="grid" x1="107" y1="545.2" x2="577" y2="545.2"/>
+<text class="axis" x="99" y="549.2" text-anchor="end">6.6</text>
+<line class="grid" x1="107" y1="494.0" x2="577" y2="494.0"/>
+<text class="axis" x="99" y="498.0" text-anchor="end">8.8</text>
+<text class="axis" x="165.8" y="718" text-anchor="middle">1 (1)</text>
+<rect x="124.2" y="525.3" width="25" height="173.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="136.8" y="520.3" text-anchor="middle">7.43</text>
+<rect x="153.2" y="672.6" width="25" height="26.4" rx="3" fill="#f59e0b"/>
+<text class="value" x="165.8" y="667.6" text-anchor="middle">1.13</text>
+<rect x="182.2" y="682.4" width="25" height="16.6" rx="3" fill="#2563eb"/>
+<text class="value" x="194.8" y="677.4" text-anchor="middle">0.71</text>
+<text class="axis" x="283.2" y="718" text-anchor="middle">10% (2)</text>
+<rect x="241.8" y="527.7" width="25" height="171.3" rx="3" fill="#94a3b8"/>
+<text class="value" x="254.2" y="522.7" text-anchor="middle">7.33</text>
+<rect x="270.8" y="667.6" width="25" height="31.4" rx="3" fill="#f59e0b"/>
+<text class="value" x="283.2" y="662.6" text-anchor="middle">1.34</text>
+<rect x="299.8" y="682.8" width="25" height="16.2" rx="3" fill="#2563eb"/>
+<text class="value" x="312.2" y="677.8" text-anchor="middle">0.69</text>
+<text class="axis" x="400.8" y="718" text-anchor="middle">50% (7)</text>
+<rect x="359.2" y="528.1" width="25" height="170.9" rx="3" fill="#94a3b8"/>
+<text class="value" x="371.8" y="523.1" text-anchor="middle">7.31</text>
+<rect x="388.2" y="671.7" width="25" height="27.3" rx="3" fill="#f59e0b"/>
+<text class="value" x="400.8" y="666.7" text-anchor="middle">1.17</text>
+<rect x="417.2" y="682.9" width="25" height="16.1" rx="3" fill="#2563eb"/>
+<text class="value" x="429.8" y="677.9" text-anchor="middle">0.69</text>
+<text class="axis" x="518.2" y="718" text-anchor="middle">max (13)</text>
+<rect x="476.8" y="528.1" width="25" height="170.9" rx="3" fill="#94a3b8"/>
+<text class="value" x="489.2" y="523.1" text-anchor="middle">7.31</text>
+<rect x="505.8" y="671.1" width="25" height="27.9" rx="3" fill="#f59e0b"/>
+<text class="value" x="518.2" y="666.1" text-anchor="middle">1.19</text>
+<rect x="534.8" y="681.4" width="25" height="17.6" rx="3" fill="#2563eb"/>
+<text class="value" x="547.2" y="676.4" text-anchor="middle">0.75</text>
+<text class="axis" transform="translate(69,596.5) rotate(-90)" text-anchor="middle">Full query (ms)</text>
+<rect x="635" y="430" width="550" height="300" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+<text class="panel-title" x="655" y="458">Yellow Taxi</text>
+<text class="subtitle" x="655" y="479">Filter column: fare_amount (not projected)</text>
+<line class="grid" x1="687" y1="699.0" x2="1157" y2="699.0"/>
+<text class="axis" x="679" y="703.0" text-anchor="end">0.0</text>
+<line class="grid" x1="687" y1="647.8" x2="1157" y2="647.8"/>
+<text class="axis" x="679" y="651.8" text-anchor="end">0.0</text>
+<line class="grid" x1="687" y1="596.5" x2="1157" y2="596.5"/>
+<text class="axis" x="679" y="600.5" text-anchor="end">0.1</text>
+<line class="grid" x1="687" y1="545.2" x2="1157" y2="545.2"/>
+<text class="axis" x="679" y="549.2" text-anchor="end">0.1</text>
+<line class="grid" x1="687" y1="494.0" x2="1157" y2="494.0"/>
+<text class="axis" x="679" y="498.0" text-anchor="end">0.1</text>
+<text class="axis" x="745.8" y="718" text-anchor="middle">1 (1)</text>
+<rect x="704.2" y="545.3" width="25" height="153.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="716.8" y="540.3" text-anchor="middle">0.09</text>
+<rect x="733.2" y="598.8" width="25" height="100.2" rx="3" fill="#f59e0b"/>
+<text class="value" x="745.8" y="593.8" text-anchor="middle">0.06</text>
+<rect x="762.2" y="588.7" width="25" height="110.3" rx="3" fill="#2563eb"/>
+<text class="value" x="774.8" y="583.7" text-anchor="middle">0.07</text>
+<text class="axis" x="863.2" y="718" text-anchor="middle">10% (2)</text>
+<rect x="821.8" y="545.3" width="25" height="153.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="834.2" y="540.3" text-anchor="middle">0.09</text>
+<rect x="850.8" y="597.1" width="25" height="101.9" rx="3" fill="#f59e0b"/>
+<text class="value" x="863.2" y="592.1" text-anchor="middle">0.06</text>
+<rect x="879.8" y="597.1" width="25" height="101.9" rx="3" fill="#2563eb"/>
+<text class="value" x="892.2" y="592.1" text-anchor="middle">0.06</text>
+<text class="axis" x="980.8" y="718" text-anchor="middle">50% (10)</text>
+<rect x="939.2" y="530.3" width="25" height="168.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="951.8" y="525.3" text-anchor="middle">0.10</text>
+<rect x="968.2" y="587.1" width="25" height="111.9" rx="3" fill="#f59e0b"/>
+<text class="value" x="980.8" y="582.1" text-anchor="middle">0.07</text>
+<rect x="997.2" y="582.1" width="25" height="116.9" rx="3" fill="#2563eb"/>
+<text class="value" x="1009.8" y="577.1" text-anchor="middle">0.07</text>
+<text class="axis" x="1098.2" y="718" text-anchor="middle">max (19)</text>
+<rect x="1056.8" y="525.3" width="25" height="173.7" rx="3" fill="#94a3b8"/>
+<text class="value" x="1069.2" y="520.3" text-anchor="middle">0.10</text>
+<rect x="1085.8" y="570.4" width="25" height="128.6" rx="3" fill="#f59e0b"/>
+<text class="value" x="1098.2" y="565.4" text-anchor="middle">0.08</text>
+<rect x="1114.8" y="562.0" width="25" height="137.0" rx="3" fill="#2563eb"/>
+<text class="value" x="1127.2" y="557.0" text-anchor="middle">0.08</text>
+<text class="axis" transform="translate(649,596.5) rotate(-90)" text-anchor="middle">Full query (ms)</text>
+<text class="axis" x="600" y="778" text-anchor="middle">Projected output columns (filter column is additional and not returned)</text>
+</svg>

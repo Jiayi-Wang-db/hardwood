@@ -112,6 +112,8 @@ public class RowGroupIterator {
     /// every column the filter tests — a predicate column need not be projected, but
     /// pruning still indexes into each file's metadata for it. Exactly the set that
     /// is validated per file and that [FileColumnOrdinals] resolves an ordinal for.
+    private BitSet projectedColumns;
+    private BitSet filterColumns;
     private BitSet touchedColumns;
 
     /// AND-necessary leaves per column index, derived once from `filterPredicate`.
@@ -346,7 +348,10 @@ public class RowGroupIterator {
         this.metadataFilteringEnabled = metadataFilteringEnabled;
         this.projectedSchema = projected;
         this.filterPredicate = filter;
-        this.touchedColumns = touchedColumns(projected, filter, referenceSchema.getColumnCount());
+        this.projectedColumns = projectedColumns(projected, referenceSchema.getColumnCount());
+        this.filterColumns = filterColumns(filter, referenceSchema.getColumnCount());
+        this.touchedColumns = (BitSet) projectedColumns.clone();
+        this.touchedColumns.or(filterColumns);
         this.dropLeavesByColumn = filter != null && metadataFilteringEnabled
                 ? PageDropPredicates.byColumn(filter) : Map.of();
 
@@ -408,9 +413,10 @@ public class RowGroupIterator {
                     "rg=" + workItem.rowGroupIndex() + " indexes")) {
                 requireSameFile(workItem);
                 boolean pageFiltering = filterPredicate != null && metadataFilteringEnabled;
+                BitSet fileColumns = fileTouchedColumns(workItem.columnOrdinals());
                 RowGroupIndexBuffers indexBuffers = RowGroupIndexBuffers.fetch(
                         workItem.inputFile(), workItem.rowGroup(),
-                        pageFiltering);
+                        pageFiltering, fileColumns);
 
                 RowRanges matchingRows = RowRanges.ALL;
                 if (pageFiltering) {
@@ -445,9 +451,11 @@ public class RowGroupIterator {
     /// chunk pointing elsewhere misplaces the region for the rest.
     ///
     /// @throws UnsupportedOperationException if any chunk names another file
-    private static void requireSameFile(WorkItem workItem) {
+    private void requireSameFile(WorkItem workItem) {
         List<ColumnChunk> columns = workItem.rowGroup().columns();
-        for (int i = 0; i < columns.size(); i++) {
+        BitSet fileColumns = fileTouchedColumns(workItem.columnOrdinals());
+        for (int i = fileColumns.nextSetBit(0); i >= 0;
+                i = fileColumns.nextSetBit(i + 1)) {
             try {
                 columns.get(i).requireSameFile();
             }
@@ -461,6 +469,18 @@ public class RowGroupIterator {
                         + workItem.rowGroupIndex() + ": " + e.getMessage(), e);
             }
         }
+    }
+
+    private BitSet fileTouchedColumns(FileColumnOrdinals columnOrdinals) {
+        BitSet fileColumns = new BitSet();
+        for (int originalIndex = touchedColumns.nextSetBit(0); originalIndex >= 0;
+                originalIndex = touchedColumns.nextSetBit(originalIndex + 1)) {
+            int fileOrdinal = columnOrdinals.fileOrdinal(originalIndex);
+            if (fileOrdinal >= 0) {
+                fileColumns.set(fileOrdinal);
+            }
+        }
+        return fileColumns;
     }
 
     /// Sets the tail-skip budget for the first row group's fetch plans.
@@ -1158,19 +1178,27 @@ public class RowGroupIterator {
                         filterPredicate);
         List<RowGroup> sourceRowGroups = fileIndex == 0 && firstFileRowGroups != null
                 ? firstFileRowGroups : prepared.rowGroups();
-        // Metadata pruning indexes every row group's chunk list by ordinal, so with
-        // it active the cross-check has to cover the whole file before it runs.
-        // Without it, the only row groups ever indexed are those that become work
-        // items, and the ones physicalSkip / maxRows discard are never looked at.
-        ChunkPathCheck chunkPaths = chunkPathCheck(prepared.schema(), columnOrdinals);
+        // Predicate metadata must be available before pruning. Projection-only
+        // metadata is deliberately deferred until we know which row groups survive.
+        prepareMetadata(prepared.rowGroups(), sourceRowGroups, columnOrdinals, filterColumns);
         boolean pruningIndexesChunks = filterPredicate != null && metadataFilteringEnabled;
+        ChunkPathCheck filterChunkPaths = chunkPathCheck(
+                prepared.schema(), columnOrdinals, filterColumns);
         if (pruningIndexesChunks) {
             for (int rgIndex = 0; rgIndex < sourceRowGroups.size(); rgIndex++) {
-                chunkPaths.verify(sourceRowGroups.get(rgIndex), rgIndex, prepared.inputFile());
+                filterChunkPaths.verify(
+                        sourceRowGroups.get(rgIndex), rgIndex, prepared.inputFile());
             }
         }
         List<FilteredRowGroup> rowGroups = filterRowGroups(
                 sourceRowGroups, prepared.inputFile(), prepared.schema(), columnOrdinals);
+        List<RowGroup> survivingRowGroups = rowGroups.stream()
+                .map(FilteredRowGroup::rowGroup)
+                .toList();
+        prepareMetadata(
+                prepared.rowGroups(), survivingRowGroups, columnOrdinals, projectedColumns);
+        ChunkPathCheck projectedChunkPaths = chunkPathCheck(
+                prepared.schema(), columnOrdinals, projectedColumns);
 
         for (int rgIndex = 0; rgIndex < rowGroups.size() && planRowBudget > 0; rgIndex++) {
             FilteredRowGroup decided = rowGroups.get(rgIndex);
@@ -1187,10 +1215,11 @@ public class RowGroupIterator {
                 firstRowGroupSkip = leadingSkip;
             }
 
-            // Not yet cross-checked when pruning was skipped: filterRowGroups then
-            // returns every row group untouched, so rgIndex is the file's own index.
+            projectedChunkPaths.verify(
+                    rg, decided.rowGroupIndex(), prepared.inputFile());
             if (!pruningIndexesChunks) {
-                chunkPaths.verify(rg, rgIndex, prepared.inputFile());
+                filterChunkPaths.verify(
+                        rg, decided.rowGroupIndex(), prepared.inputFile());
             }
 
             workItemRefCounts.put(workItems.size(),
@@ -1201,7 +1230,7 @@ public class RowGroupIterator {
                     prepared.schema(),
                     columnOrdinals,
                     fileIndex,
-                    rgIndex,
+                    decided.rowGroupIndex(),
                     workItems.size(),
                     plannedRows,
                     decided.alwaysMatches()));
@@ -1323,38 +1352,48 @@ public class RowGroupIterator {
     }
 
     /// Resolves the file-level side of the chunk-path cross-check for one file.
-    private ChunkPathCheck chunkPathCheck(FileSchema fileSchema, FileColumnOrdinals columnOrdinals) {
-        int touchedCount = touchedColumns.cardinality();
-        int[] fileOrdinals = new int[touchedCount];
-        FieldPath[] schemaPaths = new FieldPath[touchedCount];
-        int touched = 0;
-        for (int refOrdinal = touchedColumns.nextSetBit(0); refOrdinal >= 0;
-                refOrdinal = touchedColumns.nextSetBit(refOrdinal + 1)) {
+    private ChunkPathCheck chunkPathCheck(FileSchema fileSchema,
+                                          FileColumnOrdinals columnOrdinals,
+                                          BitSet referenceColumns) {
+        int columnCount = referenceColumns.cardinality();
+        int[] fileOrdinals = new int[columnCount];
+        FieldPath[] schemaPaths = new FieldPath[columnCount];
+        int column = 0;
+        for (int refOrdinal = referenceColumns.nextSetBit(0); refOrdinal >= 0;
+                refOrdinal = referenceColumns.nextSetBit(refOrdinal + 1)) {
             int fileOrdinal = columnOrdinals.fileOrdinal(refOrdinal);
-            fileOrdinals[touched] = fileOrdinal;
-            schemaPaths[touched] = fileSchema.getColumn(fileOrdinal).fieldPath();
-            touched++;
+            fileOrdinals[column] = fileOrdinal;
+            schemaPaths[column] = fileSchema.getColumn(fileOrdinal).fieldPath();
+            column++;
         }
         return new ChunkPathCheck(fileOrdinals, schemaPaths);
     }
 
     /// A row group surviving predicate push-down, and whether its statistics prove
     /// every row matches (so per-row filtering can be skipped for it).
-    private record FilteredRowGroup(RowGroup rowGroup, boolean alwaysMatches) {}
+    private record FilteredRowGroup(
+            RowGroup rowGroup, int rowGroupIndex, boolean alwaysMatches) {}
 
-    private List<FilteredRowGroup> filterRowGroups(List<RowGroup> rowGroups, InputFile inputFile,
-                                                   FileSchema fileSchema, FileColumnOrdinals columnOrdinals) throws IOException {
+    private List<FilteredRowGroup> filterRowGroups(
+            List<RowGroup> rowGroups,
+            InputFile inputFile,
+            FileSchema fileSchema,
+            FileColumnOrdinals columnOrdinals) throws IOException {
         // The metadata-filtering opt-out (#797) disables every metadata-driven prune,
         // dictionary membership included — with it off, no row group is dropped without
         // reading rows.
         if (filterPredicate == null || !metadataFilteringEnabled) {
-            return rowGroups.stream()
-                    .map(rg -> new FilteredRowGroup(rg, false))
-                    .toList();
+            List<FilteredRowGroup> unfiltered = new ArrayList<>(rowGroups.size());
+            for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.size(); rowGroupIndex++) {
+                unfiltered.add(new FilteredRowGroup(
+                        rowGroups.get(rowGroupIndex), rowGroupIndex, false));
+            }
+            return unfiltered;
         }
         List<FilteredRowGroup> filtered = new ArrayList<>(rowGroups.size());
         int fullyMatching = 0;
-        for (RowGroup rg : rowGroups) {
+        for (int rowGroupIndex = 0; rowGroupIndex < rowGroups.size(); rowGroupIndex++) {
+            RowGroup rg = rowGroups.get(rowGroupIndex);
             FilterDecision decision = RowGroupFilterEvaluator.decideRowGroup(columnOrdinals.filter(), rg,
                     new RowGroupBloomFilterSource(inputFile, rg),
                     new RowGroupDictionaryFilterSource(inputFile, rg, fileSchema, context));
@@ -1365,7 +1404,7 @@ public class RowGroupIterator {
             if (alwaysMatches) {
                 fullyMatching++;
             }
-            filtered.add(new FilteredRowGroup(rg, alwaysMatches));
+            filtered.add(new FilteredRowGroup(rg, rowGroupIndex, alwaysMatches));
         }
 
         RowGroupFilterEvent event = new RowGroupFilterEvent();
@@ -1400,17 +1439,39 @@ public class RowGroupIterator {
     }
 
     /// The reference leaf ordinals a read with this projection and filter touches.
-    private static BitSet touchedColumns(ProjectedSchema projected, ResolvedPredicate filter,
-                                         int referenceColumnCount) {
-        BitSet touched = new BitSet(referenceColumnCount);
+    private static BitSet projectedColumns(ProjectedSchema projected, int referenceColumnCount) {
+        BitSet columns = new BitSet(referenceColumnCount);
         int projectedColumnCount = projected.getProjectedColumnCount();
         for (int projectedIndex = 0; projectedIndex < projectedColumnCount; projectedIndex++) {
-            touched.set(projected.toOriginalIndex(projectedIndex));
+            columns.set(projected.toOriginalIndex(projectedIndex));
         }
+        return columns;
+    }
+
+    private static BitSet filterColumns(ResolvedPredicate filter, int referenceColumnCount) {
+        BitSet columns = new BitSet(referenceColumnCount);
         if (filter != null) {
-            ResolvedPredicate.collectColumnIndices(filter, touched);
+            ResolvedPredicate.collectColumnIndices(filter, columns);
         }
-        return touched;
+        return columns;
+    }
+
+    private void prepareMetadata(List<RowGroup> metadataOwner,
+                                 List<RowGroup> targetRowGroups,
+                                 FileColumnOrdinals columnOrdinals,
+                                 BitSet referenceColumns) {
+        if (!(metadataOwner instanceof ProjectedColumnMetadata projectedMetadata)) {
+            return;
+        }
+        BitSet fileColumns = new BitSet();
+        for (int originalIndex = referenceColumns.nextSetBit(0); originalIndex >= 0;
+                originalIndex = referenceColumns.nextSetBit(originalIndex + 1)) {
+            int fileOrdinal = columnOrdinals.fileOrdinal(originalIndex);
+            if (fileOrdinal >= 0) {
+                fileColumns.set(fileOrdinal);
+            }
+        }
+        projectedMetadata.prepareColumns(fileColumns, targetRowGroups);
     }
 
     /// Validates the columns this read touches ([#touchedColumns]) against the

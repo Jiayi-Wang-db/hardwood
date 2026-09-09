@@ -1,0 +1,48 @@
+# Modular footer query prototype
+
+Status: completed
+
+## Format
+
+A complete modular-footer file retains the original `PAR1` header and every byte through the end
+of the data and index region. It replaces the standard footer with a modular metadata blob and a
+20-byte trailer:
+
+```text
+[unchanged file prefix][modular metadata]
+[modular start: little-endian i64][root offset: little-endian i64][MFP1]
+```
+
+The root offset and every module offset are relative to the start of the modular metadata. This
+keeps metadata-only blobs relocatable and allows the same encoded modules to be appended to a
+complete data file.
+
+## Reader
+
+Footer detection remains internal to the metadata reader. `PAR1` files follow the standard path;
+`MFP1` files load the modular root, schema, placement, and descriptive file metadata. Placement
+stays in its packed column-major arrays. Row groups and column chunks are lazy list views over
+those arrays, so only columns reached by projection, filtering, or metadata inspection create the
+existing boundary records. Row-group statistics remain independently encoded and one column is
+decoded only when a consumer first requests a chunk from that column. The page reader then follows
+the original column-chunk offsets and reads the unchanged data pages normally.
+
+Metadata absent from the modular representation uses conservative defaults. In particular,
+missing encoding statistics disable dictionary-based row-group pruning, and missing page-index
+locations disable page-index pruning. Row-group min/max statistics retain their exactness flags,
+so truncated bounds remain safe for predicate pruning.
+
+## Scope
+
+This is an experimental compatibility path for benchmarking the modular representation. It adds
+no public API and does not change standard Parquet behavior.
+
+## Jump-table footer
+
+The benchmark's jump-table representation remains a standard `PAR1` footer. A versioned pointer
+in the first `FileMetaData` field locates an appended index containing top-level field offsets and
+one byte offset per column chunk. Hardwood detects that pointer, reads schema and row counts from
+their indexed locations, and exposes row groups and column chunks as lazy lists. Accessing a
+projected or filter column decodes its original standard `ColumnChunk` bytes directly; metadata
+for other columns is never walked or materialized. Files without the pointer continue through the
+ordinary standard-footer reader.

@@ -41,6 +41,8 @@ allocation profiling, `-rf json -rff out.json` for machine-readable results,
 | `PageScanBenchmark` | Sequential header-based page scan vs. offset-index lookup | `generate_benchmark_data.py` |
 | `PageHandlingBenchmark` | Per-page decompression vs. full page decode | taxi data, downloaded by `./mvnw verify -Pperformance-test` |
 | `MemoryMapBenchmark` | Raw I/O floor: mmap + copy of a whole file, no decode | taxi data, downloaded by `./mvnw verify -Pperformance-test` |
+| `FooterRepresentationBenchmark` | Footer initialization and the same filtered query through OSS, jump-table, and modular footers | US Accidents corpus from `parquet-footer-bench` |
+| `FooterQuerySweep` | Full pruned and selective-query time across projection widths for three footer representations | four-file corpus from `parquet-footer-bench` |
 | `FixedSizeListDecodeBenchmark` | Fixed-size-list fast path vs. general list decode across vector widths | `generate_fixed_size_list_data.py` |
 | `FixedSizeListFallbackBenchmark` | Detector cost on almost-fixed-width pages that fall back | `generate_fixed_size_list_data.py` |
 | `nested/NestedListReadBenchmark` | `LIST<primitive>` reads across element types and null densities vs. a flat floor | self-generating (`NestedListFileGenerator`) |
@@ -48,6 +50,33 @@ allocation profiling, `-rf json -rff out.json` for machine-readable results,
 | `mixed/MixedSchemaReadBenchmark` | Schema-composition effects (scalars next to lists, structs, depth) on the nested path (#732) | self-generating (`MixedSchemaFileGenerator`) |
 | `wide/WideSchemaMetadataBenchmark` | Footer decode, schema build and `open()` for 10 … 100,000 `FLOAT64` columns (#919) | self-generating (`WideSchemaFileGenerator`) |
 | `wide/WideSchemaMetadataParquetJavaBenchmark` | The same three steps through parquet-java, over the same fixtures | self-generating (`WideSchemaFileGenerator`) |
+
+### Footer-isolation query sweep
+
+The graph below shows complete queries with one unprojected filter column. Statistics eliminate
+every row group, so the timing reflects footer open, projection preparation, statistics decoding,
+and row-group filtering without data-page I/O. Jump-table metadata decodes statistics with the
+projected metadata; modular metadata keeps projected placement separate from filter statistics.
+
+![Footer-isolation query sweep](results/footer-query-sweep.svg)
+
+### Selective query sweep
+
+This second graph uses equality predicates at a column's global maximum. Each query returns one
+real row and scans one surviving row group. A cell is shown only when OSS spends at least 40% of
+its end-to-end query time opening and planning; non-qualifying datasets remain as labeled negative
+controls.
+
+![Selective footer query sweep](results/selective-footer-query-sweep.svg)
+
+Regenerate the graph from the CSV output:
+
+```shell
+python3 plot_footer_query_sweep.py results/footer-query-sweep.csv \
+  results/footer-query-sweep.svg --kind pruned
+python3 plot_footer_query_sweep.py results/selective-footer-query-sweep.csv \
+  results/selective-footer-query-sweep.svg --kind selective
+```
 
 Python generator scripts live in the parent `performance-testing/` directory and
 default their output to `performance-testing/test-data-setup/target/benchmark-data`;

@@ -9,6 +9,7 @@ package dev.hardwood.internal.reader;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.BitSet;
 import java.util.List;
 
 import dev.hardwood.InputFile;
@@ -61,12 +62,22 @@ public class RowGroupIndexBuffers {
     /// @param includeColumnIndexes whether ColumnIndex buffers should be fetched
     public static RowGroupIndexBuffers fetch(InputFile inputFile,
             RowGroup rowGroup, boolean includeColumnIndexes) throws IOException {
+        BitSet columns = new BitSet(rowGroup.columns().size());
+        columns.set(0, rowGroup.columns().size());
+        return fetch(inputFile, rowGroup, includeColumnIndexes, columns);
+    }
+
+    /// Fetches indexes only for the file column ordinals a query touches.
+    public static RowGroupIndexBuffers fetch(InputFile inputFile, RowGroup rowGroup,
+            boolean includeColumnIndexes, BitSet columns) throws IOException {
 
         List<ColumnChunk> allColumns = rowGroup.columns();
 
         long minOffset = Long.MAX_VALUE;
         long maxEnd = Long.MIN_VALUE;
-        for (ColumnChunk col : allColumns) {
+        for (int column = columns.nextSetBit(0); column >= 0;
+                column = columns.nextSetBit(column + 1)) {
+            ColumnChunk col = allColumns.get(column);
             if (col.offsetIndexOffset() != null) {
                 minOffset = Math.min(minOffset, col.offsetIndexOffset());
                 maxEnd = Math.max(maxEnd,
@@ -95,7 +106,7 @@ public class RowGroupIndexBuffers {
         }
         ByteBuffer indexRegion = inputFile.readRange(minOffset, Math.toIntExact(indexRegionSize));
 
-        for (int i = 0; i < allColumns.size(); i++) {
+        for (int i = columns.nextSetBit(0); i >= 0; i = columns.nextSetBit(i + 1)) {
             ColumnChunk col = allColumns.get(i);
             ByteBuffer oi = null;
             ByteBuffer ci = null;

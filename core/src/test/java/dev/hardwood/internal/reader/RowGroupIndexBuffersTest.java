@@ -9,6 +9,7 @@ package dev.hardwood.internal.reader;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.BitSet;
 
 import org.junit.jupiter.api.Test;
 
@@ -83,6 +84,25 @@ class RowGroupIndexBuffersTest {
             assertThat(fullBuffers.forColumn(i).columnIndex())
                     .as("Column %d full column index", i).isNotNull();
         }
+    }
+
+    @Test
+    void fetchesIndexesOnlyForTouchedColumns() throws Exception {
+        CountingInputFile countingFile = new CountingInputFile(InputFile.of(PAGE_INDEX_FILE));
+        countingFile.open();
+        FileMetaData meta = ParquetMetadataReader.readMetadata(countingFile);
+        RowGroup rowGroup = meta.rowGroups().getFirst();
+        BitSet touched = new BitSet();
+        touched.set(1);
+
+        RowGroupIndexBuffers buffers = RowGroupIndexBuffers.fetch(
+                countingFile, rowGroup, true, touched);
+
+        assertThat(buffers.forColumn(0)).isNull();
+        assertThat(buffers.forColumn(1)).isNotNull();
+        assertThat(buffers.forColumn(1).offsetIndex()).isNotNull();
+        assertThat(buffers.forColumn(1).columnIndex()).isNotNull();
+        assertThat(buffers.forColumn(2)).isNull();
     }
 
     @Test

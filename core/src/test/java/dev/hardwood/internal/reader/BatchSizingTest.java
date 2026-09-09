@@ -8,11 +8,15 @@
 package dev.hardwood.internal.reader;
 
 import java.nio.file.Path;
+import java.util.AbstractList;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
 import dev.hardwood.InputFile;
 import dev.hardwood.internal.schema.ProjectedSchema;
+import dev.hardwood.metadata.ColumnChunk;
+import dev.hardwood.metadata.RowGroup;
 import dev.hardwood.reader.ParquetFileReader;
 import dev.hardwood.schema.ColumnProjection;
 import dev.hardwood.schema.FileSchema;
@@ -86,6 +90,36 @@ class BatchSizingTest {
                     .isEqualTo((int) (TARGET_BYTES / (768 * 4)))
                     .isEqualTo(2048)
                     .isLessThan(16_384);
+        }
+    }
+
+    @Test
+    void fanoutReadsOnlyProjectedColumnMetadata() throws Exception {
+        try (ParquetFileReader reader = ParquetFileReader.open(InputFile.of(PRIMITIVES))) {
+            FileSchema schema = reader.getFileSchema();
+            ProjectedSchema projected =
+                    ProjectedSchema.create(schema, ColumnProjection.columns("string_col"));
+            RowGroup source = reader.getFileMetaData().rowGroups().getFirst();
+            int projectedOrdinal = projected.toOriginalIndex(0);
+            List<ColumnChunk> guardedColumns = new AbstractList<>() {
+                @Override
+                public ColumnChunk get(int index) {
+                    if (index != projectedOrdinal) {
+                        throw new AssertionError("read unprojected column " + index);
+                    }
+                    return source.columns().get(index);
+                }
+
+                @Override
+                public int size() {
+                    return source.columns().size();
+                }
+            };
+            RowGroup guarded = new RowGroup(
+                    guardedColumns, source.totalByteSize(), source.numRows());
+
+            assertThat(BatchSizing.valuesPerRow(projected, List.of(guarded)))
+                    .containsExactly(1.0);
         }
     }
 

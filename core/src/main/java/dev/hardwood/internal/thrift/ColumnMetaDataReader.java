@@ -29,19 +29,23 @@ public class ColumnMetaDataReader {
     private static final FieldPath EMPTY_PATH = new FieldPath(List.of());
 
     public static ColumnMetaData read(ThriftCompactReader reader) {
+        return read(reader, null);
+    }
+
+    static ColumnMetaData read(ThriftCompactReader reader, FieldPath indexedPath) {
         short saved = reader.pushFieldIdContext();
         try {
-            return readInternal(reader);
+            return readInternal(reader, indexedPath);
         }
         finally {
             reader.popFieldIdContext(saved);
         }
     }
 
-    private static ColumnMetaData readInternal(ThriftCompactReader reader) {
+    private static ColumnMetaData readInternal(ThriftCompactReader reader, FieldPath indexedPath) {
         PhysicalType type = null;
         List<Encoding> encodings = Collections.emptyList();
-        FieldPath pathInSchema = EMPTY_PATH;
+        FieldPath pathInSchema = indexedPath == null ? EMPTY_PATH : indexedPath;
         CompressionCodec codec = null;
         long numValues = 0;
         long totalUncompressedSize = 0;
@@ -75,7 +79,13 @@ public class ColumnMetaDataReader {
                     break;
                 case 3: // path_in_schema (required list<string>)
                     if (reader.acceptField(header, Codes.LIST)) {
-                        pathInSchema = reader.pathCache().next(reader, "ColumnMetaData.path_in_schema");
+                        if (indexedPath == null) {
+                            pathInSchema = reader.pathCache().next(
+                                    reader, "ColumnMetaData.path_in_schema");
+                        }
+                        else {
+                            reader.skipElements(reader.readListHeader());
+                        }
                     }
                     break;
                 case 4: // codec

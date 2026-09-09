@@ -88,6 +88,12 @@ public class ThriftCompactReader {
         this.startPosition = 0;
     }
 
+    /// Creates a reader bounded to one indexed metadata value.
+    public ThriftCompactReader(ByteBuffer buffer, int offset, int length) {
+        this.buffer = buffer.slice(offset, length).order(ByteOrder.LITTLE_ENDIAN);
+        this.startPosition = 0;
+    }
+
     /// Returns the number of bytes read from the buffer.
     public int getBytesRead() {
         return buffer.position() - startPosition;
@@ -715,6 +721,12 @@ public class ThriftCompactReader {
     /// Restore the last field ID after reading a nested struct.
     public void popFieldIdContext(short savedFieldId) {
         lastFieldId = savedFieldId;
+    }
+
+    /// Sets the preceding field id when decoding begins at an indexed field in the middle of a
+    /// struct. Jump-table footer offsets use this to preserve Compact Protocol delta field ids.
+    void setFieldIdContext(short fieldId) {
+        lastFieldId = fieldId;
     }
 
     /// Decodes one element of a `list<struct>` from the reader it is given, which is positioned
